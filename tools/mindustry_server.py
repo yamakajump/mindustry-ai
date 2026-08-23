@@ -14,6 +14,12 @@ import threading
 import time
 from pathlib import Path
 
+# Mindustry colourises its log when it believes a capable terminal is attached, which
+# happens on Linux but not under the dumb terminal Windows gives it. Stripping the
+# escapes here keeps patterns identical across platforms; matching them in every
+# caller instead would be a permanent source of tests that pass on one OS only.
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
 # Printed once the server has finished loading and is accepting commands.
 READY_PATTERN = r"Server loaded\.|Opened a server|Loaded \d+ mod"
 
@@ -63,8 +69,9 @@ class ServerProcess:
     def _pump(self) -> None:
         assert self._proc is not None and self._proc.stdout is not None
         for line in self._proc.stdout:
+            clean = ANSI_ESCAPE.sub("", line).rstrip("\r\n")
             with self._lock:
-                self._lines.append(line.rstrip("\r\n"))
+                self._lines.append(clean)
 
     def send(self, command: str) -> None:
         """Write one command to the server console."""
