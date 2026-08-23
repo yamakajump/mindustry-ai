@@ -1,5 +1,6 @@
 # Dependances de developpement et de test.
 # Le paquet gamma lui-meme n a pas encore de dependance runtime hors numpy.
 numpy>=2.0
+gymnasium>=1.0
 pytest>=8
 pytest-timeout>=2.3

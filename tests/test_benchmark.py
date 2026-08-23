@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from tools.mindustry_server import ServerProcess
+from gamma.server import ServerProcess
 
 BENCH_LINE = re.compile(
     r"bench frames=(\d+) ticks=(\d+) seconds=([\d.]+) fps=([\d.]+) tps=([\d.]+)"

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tools.mindustry_server import ServerProcess
+from gamma.server import ServerProcess
 
 
 def test_plugin_is_listed_by_the_server(server_with_plugin: Path) -> None:

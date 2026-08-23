@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from tools.mindustry_server import ServerProcess
+from gamma.server import ServerProcess
 
 from .test_benchmark import run_bench
 

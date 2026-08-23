@@ -19,8 +19,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from tools.mindustry_server import ServerProcess, install_plugin
-from tools.setup_server import setup_server
+from gamma.server import ServerProcess, install_plugin
+from gamma.server_setup import setup_server
 
 BENCH_LINE = re.compile(r"bench frames=(\d+) ticks=(\d+) seconds=([\d.]+) fps=([\d.]+) tps=([\d.]+)")
 STATUS_LINE = re.compile(r"bridge ready .* tick=([\d.]+) wave=(\d+)")

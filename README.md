@@ -71,6 +71,27 @@ Full details in [`docs/architecture.md`](docs/architecture.md). The reasoning be
 choice, including the alternatives that were rejected, is in
 [`docs/decisions/`](docs/decisions/).
 
+## Where it stands
+
+The first curriculum task is live, with a benchmark. `T1` asks an agent to grow the core's
+copper stock to 250 within 450 decisions, which is the budget before the first wave lands.
+
+| Policy | Solved | Mean reward | Actions accepted |
+|---|---|---|---|
+| Random | 0/5 | -1.98 | 9% |
+| Masked random | 0/5 | -2.00 | 11% |
+| **Alpha** (scripted) | **2/5** | **+4.12** | **60%** |
+
+Random policies do not merely score badly, they go bankrupt: they spend the starting
+copper on blocks placed at random, build nothing that produces, and every later action is
+refused for lack of funds. Masking gets more actions accepted and still scores no better,
+because knowing which moves are legal is not knowing which are good. That gap is the part
+that has to be learned.
+
+Alpha solving two in five is the calibration working. A baseline that always won would
+make the task useless as a target; one that never won would leave no evidence it is
+solvable. Full numbers and method in [`docs/measurements/baselines.md`](docs/measurements/baselines.md).
+
 ## Milestones
 
 Mindustry players do not have a fixed avatar. They embody a core unit that upgrades with
@@ -79,7 +100,7 @@ because it maps cleanly onto how capable they actually are.
 
 | Milestone | What it is | Status |
 |---|---|---|
-| **Alpha** | A scripted baseline. It plays, badly but predictably. The yardstick everything else is measured against. | not started |
+| **Alpha** | A scripted baseline. It plays, badly but predictably. The yardstick everything else is measured against. | **solves T1 two times in five** |
 | **Beta** | The first agent that genuinely learns. Beats Alpha. | not started |
 | **Gamma** | An agent that beats competent human players. | the point of all this |
 
@@ -97,11 +118,10 @@ Ordered by dependency, not by excitement.
 - [x] **Bridge protocol.** A socket speaking length-prefixed frames, with the world frozen between decisions. [Measured](docs/measurements/throughput.md) at 2,247 decisions/s.
 - [x] **Observations.** Spatial tensors on the binary frame type, 14 channels, plus scalars. [Measured](docs/measurements/throughput.md) at 481 steps/s with a 896 KB tensor.
 - [x] **Actions.** Placing and breaking blocks, priced against the core, refused by the engine when illegal.
-- [ ] **Legality masks.** Per-tile placement masks for the position head.
-- [ ] **Environment.** A Gymnasium-compatible wrapper: observations, factored masked actions, reward, fast reset.
-- [ ] **Replays.** An event log format, and a web viewer that replays a match tile by tile.
-- [ ] **Alpha.** The scripted baseline, and the curriculum benchmark to score anything against it.
+- [x] **Environment.** Gymnasium-compatible: factored action space, masks for every head, reward, curriculum tasks.
+- [x] **Alpha.** The scripted baseline, and a [benchmark](docs/measurements/baselines.md) to score anything against it.
 - [ ] **Beta.** First learned agent. Clears the early curriculum stages and beats Alpha on them.
+- [ ] **Replays.** An event log format, and a web viewer that replays a match tile by tile.
 - [ ] **Full games.** Survival on real maps, the whole economy and defence loop.
 - [ ] **Generalisation.** Procedurally generated maps, so the agent learns to play rather than to memorise.
 - [ ] **Self-play.** Attack and PvP modes, agents trained against each other.
@@ -140,6 +160,12 @@ Once a server is running with the plugin installed, console commands are availab
 measures throughput over a window; `bridge-speed <n|max>` sets simulation speed;
 `bridge-port` reports the agent socket.
 
+Running the benchmark:
+
+```bash
+.venv/Scripts/python tools/benchmark.py --episodes 5
+```
+
 Driving a game from Python:
 
 ```python
@@ -157,6 +183,19 @@ with Bridge(port=7654, tensor=True) as bridge:
 
 The port defaults to 7654 and is set per instance with `-Dmindustryai.port=N`, which is how
 parallel environments avoid colliding.
+
+Or through the Gymnasium environment, which manages the server for you:
+
+```python
+from gamma import tasks
+from gamma.env import MindustryEnv
+from gamma.alpha import AlphaPolicy
+from gamma.policies import run_episode
+
+env = MindustryEnv(tasks.T1_COPPER, jar="bridge/build/libs/mindustry-ai-bridge.jar")
+print(run_episode(env, AlphaPolicy(env)))
+env.close()
+```
 
 ## Prior art
 
