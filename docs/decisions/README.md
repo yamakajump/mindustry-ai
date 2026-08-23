@@ -13,5 +13,6 @@ mistake is worth more than a clean history that hides it.
 | [4](0004-curriculum-first.md) | Curriculum of graded tasks before full games | accepted |
 | [5](0005-in-repo-ppo.md) | PPO implemented in-repo, not pulled from a library | accepted |
 | [6](0006-fixed-timestep-acceleration.md) | Fixed timestep, with speed controlled by frame budget | accepted |
+| [7](0007-pause-based-synchronous-stepping.md) | Synchronous stepping by pausing, not by blocking | accepted |
 
 The overall picture these add up to is in [`../architecture.md`](../architecture.md).

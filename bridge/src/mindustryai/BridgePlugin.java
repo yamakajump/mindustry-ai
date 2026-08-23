@@ -5,6 +5,10 @@ import arc.util.CommandHandler;
 import arc.util.Log;
 import mindustry.Vars;
 import mindustry.mod.Plugin;
+import mindustryai.net.BridgeServer;
+import mindustryai.net.StepLoop;
+
+import java.io.IOException;
 
 /**
  * Entry point for the mindustry-ai bridge.
@@ -17,13 +21,30 @@ import mindustry.mod.Plugin;
 public class BridgePlugin extends Plugin {
     public static final String VERSION = "0.1.0";
 
+    /** Overridden with -Dmindustryai.port=N so parallel instances do not collide. */
+    private static final String PORT_PROPERTY = "mindustryai.port";
+    private static final int DEFAULT_PORT = 7654;
+
     private final Clock clock = new Clock();
     private final Benchmark benchmark = new Benchmark();
+    private BridgeServer server;
+    private StepLoop stepLoop;
 
     @Override
     public void init() {
         boolean clockReady = clock.install();
         Log.info("[mindustry-ai] bridge @ loaded, clock=@", VERSION, clockReady ? "ok" : "degraded");
+
+        int port = Integer.getInteger(PORT_PROPERTY, DEFAULT_PORT);
+        server = new BridgeServer(port);
+        stepLoop = new StepLoop(server, clock);
+        stepLoop.install();
+
+        try {
+            server.start();
+        } catch (IOException e) {
+            Log.err("[mindustry-ai] could not listen on port @: @", port, e.getMessage());
+        }
     }
 
     @Override
@@ -49,6 +70,10 @@ public class BridgePlugin extends Plugin {
                 Log.err("bench window must be an integer number of seconds");
             }
         });
+
+        handler.register("bridge-port", "Report the agent socket port.", args ->
+            Log.info("bridge port=@ connected=@", server.port(), server.hasClient())
+        );
 
         handler.register("bridge-speed", "<multiplier|max>", "Set simulation speed.", args -> {
             String raw = args[0];
