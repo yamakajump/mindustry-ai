@@ -96,7 +96,8 @@ Ordered by dependency, not by excitement.
 - [x] **Throughput benchmark.** [Measured](docs/measurements/throughput.md): 592x realtime on one instance, 4,806x across 24.
 - [x] **Bridge protocol.** A socket speaking length-prefixed frames, with the world frozen between decisions. [Measured](docs/measurements/throughput.md) at 2,247 decisions/s.
 - [x] **Observations.** Spatial tensors on the binary frame type, 14 channels, plus scalars. [Measured](docs/measurements/throughput.md) at 481 steps/s with a 896 KB tensor.
-- [ ] **Actions.** Placing and breaking blocks, with legality masks computed by the engine.
+- [x] **Actions.** Placing and breaking blocks, priced against the core, refused by the engine when illegal.
+- [ ] **Legality masks.** Per-tile placement masks for the position head.
 - [ ] **Environment.** A Gymnasium-compatible wrapper: observations, factored masked actions, reward, fast reset.
 - [ ] **Replays.** An event log format, and a web viewer that replays a match tile by tile.
 - [ ] **Alpha.** The scripted baseline, and the curriculum benchmark to score anything against it.
@@ -117,9 +118,12 @@ python -m venv .venv
 .venv/Scripts/python -m pytest tests/ -v
 ```
 
-The tests start real Mindustry servers and drive them through stdin. There are no mocks,
-because engine state only exists inside a running engine and a mock of it would assert
-nothing. A full run takes about 70 seconds.
+The tests start real Mindustry servers and drive them through stdin and the agent
+socket. There are no mocks, because engine state only exists inside a running engine and a
+mock of it would assert nothing. A full run takes about 45 seconds.
+
+Throughput measurements are marked `perf` and excluded by default: a second server busy on
+another core skews them. Run them alone with `pytest -m perf`.
 
 To reproduce the throughput figures:
 

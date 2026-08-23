@@ -6,20 +6,19 @@ import numpy as np
 import pytest
 
 from gamma.bridge import Bridge
-from tests.conftest import BRIDGE_PORT
 
 
 @pytest.fixture
-def seeing(bridge_server):
+def seeing(bridge_server, bridge_ports):
     """A connection that negotiated spatial tensors, on a loaded map."""
-    with Bridge(port=BRIDGE_PORT, tensor=True) as client:
+    with Bridge(port=bridge_ports[0], tensor=True) as client:
         client.reset("Ancient_Caldera", "survival")
         yield client
 
 
-def test_tensor_is_absent_unless_requested(bridge_server) -> None:
+def test_tensor_is_absent_unless_requested(bridge_server, bridge_ports) -> None:
     """Tensors are hundreds of kilobytes. An agent that never asked must not pay."""
-    with Bridge(port=BRIDGE_PORT, tensor=False) as blind:
+    with Bridge(port=bridge_ports[0], tensor=False) as blind:
         obs = blind.reset("Ancient_Caldera", "survival")
         assert "spatial" not in obs
         assert "tensor" not in obs
