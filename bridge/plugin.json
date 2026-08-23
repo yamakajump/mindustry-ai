@@ -1,0 +1,9 @@
+{
+  "name": "mindustry-ai-bridge",
+  "displayName": "mindustry-ai bridge",
+  "author": "yamakajump",
+  "main": "mindustryai.BridgePlugin",
+  "description": "Exposes Mindustry state and actions to external learning agents.",
+  "version": "0.1.0",
+  "minGameVersion": "146"
+}

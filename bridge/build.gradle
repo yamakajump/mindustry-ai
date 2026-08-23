@@ -1,0 +1,36 @@
+apply plugin: "java"
+
+sourceSets.main.java.srcDirs = ["src"]
+
+repositories {
+    mavenCentral()
+
+    // Mindustry publishes its dependency jar as a release artifact rather than to a
+    // real Maven repository. An Ivy layout pointed at GitHub is the supported approach,
+    // and is what the official plugin template does.
+    ivy {
+        url = "https://github.com/"
+        patternLayout { artifact "/[organisation]/[module]/releases/download/[revision]/dependencies.jar" }
+        metadataSources { artifact() }
+    }
+}
+
+java {
+    targetCompatibility = JavaVersion.VERSION_17
+    sourceCompatibility = JavaVersion.VERSION_17
+}
+
+ext {
+    // Pinned deliberately. Never "latest": a silent engine bump would invalidate
+    // every throughput measurement recorded in this repository.
+    mindustryVersion = "v159.7"
+}
+
+dependencies {
+    compileOnly "Anuken:Mindustry:$mindustryVersion"
+}
+
+jar {
+    archiveFileName = "mindustry-ai-bridge.jar"
+    from(rootDir) { include "plugin.json" }
+}

@@ -25,7 +25,7 @@ These are properties of Mindustry, not choices. Everything downstream bends arou
 | Constraint | Consequence |
 |---|---|
 | The engine is not thread safe | Parallelism means many JVM processes, never many threads inside one. |
-| Simulation is expensive | Thousands of blocks and item movements per tick. Expect tens of times realtime per instance, not thousands. Sample efficiency matters. |
+| Simulation is expensive | Thousands of blocks and item movements per tick. Cost scales with how much factory exists, so a developed base is far slower than an empty map. |
 | Mindustry is GPL-3.0 | Anything linking against the engine is GPL-3.0, including this project. |
 | No observation API exists | The bridge has to expose state the game was never designed to expose. |
 | Rewards arrive late | A smelter pays off minutes after the decision to build it. Credit assignment is the hard part. |
@@ -232,13 +232,16 @@ a side-by-side comparator for two runs, and live training metrics.
 
 ## Throughput budget
 
-Reference hardware for development is a Ryzen 9 9950X3D (32 threads), an RTX 5090, and
-93 GB of RAM. Each Mindustry instance is single threaded, so roughly 24 concurrent
-environments fit while leaving headroom for training.
+Measured, not estimated. Full results and caveats in
+[`measurements/throughput.md`](measurements/throughput.md).
 
-Every number about simulation speed in this repository must come from a measurement, not
-an estimate. The first milestone after the bridge exists is a benchmark reporting ticks
-per second per instance, because that figure decides what is trainable at all.
+On a Ryzen 9 9950X3D with 93 GB of RAM, one accelerated instance reaches **592x realtime**,
+and 24 concurrent instances reach **4,806x aggregate**, which is roughly 8 full ten-minute
+matches per wall-clock second. That is an order of magnitude better than this design
+assumed, and it means simulation speed is not the binding constraint on the curriculum.
+
+Two caveats keep that figure honest: it was measured on an almost empty map, and with no
+agent in the loop. A developed factory and a policy network will both take their cut.
 
 ## Open questions
 
@@ -247,7 +250,8 @@ Unresolved, recorded here so they are not silently forgotten.
 - **Reset cost.** Whether a fresh map load is cheap enough per episode, or whether state
   must be snapshotted and restored in memory instead.
 - **Determinism.** How reproducible a Mindustry run is given identical seeds and actions.
-  This decides whether replays can be stored as action sequences instead of event logs.
+  This decides whether replays can be stored as action sequences instead of event logs. The
+  fixed timestep from decision 6 removes one source of divergence, but the rest is untested.
 - **MindustryX.** The [MindustryX](https://github.com/TinyLake/MindustryX) fork advertises
   a local AI bridge. Worth evaluating before writing ours from scratch.
 - **Observation channel count.** The list above is a starting point, not a measurement.
