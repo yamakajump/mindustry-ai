@@ -26,7 +26,7 @@ jobs:
         run: ./gradlew jar --no-daemon
 
       - name: Install test dependencies
-        run: pip install pytest pytest-timeout
+        run: pip install -r requirements-dev.txt
 
       - name: Run integration tests
         # Throughput tests are excluded on purpose. A shared runner cannot produce a
