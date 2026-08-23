@@ -30,7 +30,16 @@ import java.util.concurrent.TimeUnit;
 public class BridgeServer {
     private final int port;
     private final BlockingQueue<String> requests = new ArrayBlockingQueue<>(16);
-    private final BlockingQueue<String> replies = new ArrayBlockingQueue<>(16);
+    private final BlockingQueue<Reply> replies = new ArrayBlockingQueue<>(16);
+
+    /**
+     * One answer: a JSON frame, optionally followed by a binary frame.
+     *
+     * <p>Two frames rather than one mixed payload, so the client can read the shape and
+     * dtype out of the JSON before deciding how to interpret the bytes that follow.
+     */
+    public record Reply(String json, byte[] binary) {
+    }
 
     private volatile ServerSocket serverSocket;
     private volatile Socket client;
@@ -101,8 +110,11 @@ public class BridgeServer {
             // shows up as a hung agent, which is the honest signal.
             try {
                 requests.put(frame.text());
-                String reply = replies.take();
-                Protocol.writeJson(out, reply);
+                Reply reply = replies.take();
+                Protocol.writeJson(out, reply.json());
+                if (reply.binary() != null) {
+                    Protocol.write(out, Protocol.TYPE_BINARY, reply.binary());
+                }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return;
@@ -120,8 +132,19 @@ public class BridgeServer {
 
     /** Hand a reply back to the network thread. Called from the game thread only. */
     public void reply(String json) {
+        reply(json, null);
+    }
+
+    /**
+     * Hand back a reply with a binary payload. Called from the game thread only.
+     *
+     * <p>The array is copied. The encoder reuses its buffer between calls, and handing
+     * the live one to another thread would work right up until it did not.
+     */
+    public void reply(String json, byte[] binary) {
+        Reply payload = new Reply(json, binary == null ? null : binary.clone());
         try {
-            if (!replies.offer(json, 5, TimeUnit.SECONDS)) {
+            if (!replies.offer(payload, 5, TimeUnit.SECONDS)) {
                 Log.err("[mindustry-ai] reply queue full, dropping response");
             }
         } catch (InterruptedException e) {
