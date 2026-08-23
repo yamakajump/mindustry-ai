@@ -16,6 +16,8 @@ import struct
 import time
 from typing import Any
 
+import numpy as np
+
 TYPE_JSON = 0
 TYPE_BINARY = 1
 PROTOCOL_VERSION = 1
@@ -30,10 +32,19 @@ class BridgeError(RuntimeError):
 class Bridge:
     """A connection to one Mindustry instance."""
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 7654, timeout: float = 60.0) -> None:
+    def __init__(
+        self,
+        host: str = "127.0.0.1",
+        port: int = 7654,
+        timeout: float = 60.0,
+        tensor: bool = False,
+    ) -> None:
         self.host = host
         self.port = port
         self.timeout = timeout
+        # Spatial tensors are large, so they are opt-in and negotiated at handshake.
+        self.tensor = tensor
+        self.channels: list[str] = []
         self._sock: socket.socket | None = None
 
     # Connection ----------------------------------------------------------------
@@ -57,7 +68,8 @@ class Bridge:
         else:
             raise ConnectionError(f"no bridge on {self.host}:{self.port}") from last
 
-        hello = self.request({"cmd": "hello"})
+        hello = self.request({"cmd": "hello", "tensor": self.tensor})
+        self.channels = hello.get("channels", [])
         if hello.get("protocol") != PROTOCOL_VERSION:
             raise BridgeError(
                 f"protocol mismatch: client speaks {PROTOCOL_VERSION}, "
@@ -121,7 +133,11 @@ class Bridge:
     # Commands ------------------------------------------------------------------
 
     def request(self, message: dict[str, Any]) -> dict[str, Any]:
-        """Send one command and return its reply, raising on a reported failure."""
+        """Send one command and return its reply, raising on a reported failure.
+
+        When the reply announces a tensor, the binary frame that follows is read and
+        exposed as `reply["spatial"]`, a numpy array shaped (channels, height, width).
+        """
         self._send(json.dumps(message).encode("utf-8"))
         kind, payload = self._receive()
         if kind != TYPE_JSON:
@@ -130,7 +146,30 @@ class Bridge:
         reply = json.loads(payload.decode("utf-8"))
         if not reply.get("ok", False):
             raise BridgeError(reply.get("error", "unknown error"))
+
+        spec = reply.get("tensor")
+        if isinstance(spec, dict):
+            # The layout can change between maps, so trust what this frame declares
+            # rather than what the handshake said.
+            self.channels = spec.get("channels", self.channels)
+            reply["spatial"] = self._read_tensor(spec)
         return reply
+
+    def _read_tensor(self, spec: dict[str, Any]) -> np.ndarray:
+        kind, payload = self._receive()
+        if kind != TYPE_BINARY:
+            raise BridgeError(f"expected a binary frame, got type {kind}")
+
+        shape = tuple(spec["shape"])
+        expected = int(np.prod(shape))
+        if len(payload) != expected:
+            raise BridgeError(
+                f"tensor frame is {len(payload)} bytes, shape {shape} needs {expected}"
+            )
+
+        # frombuffer avoids a copy, but the buffer is read-only and reused, so reshape
+        # into a fresh array the caller can safely hold on to.
+        return np.frombuffer(payload, dtype=np.uint8).reshape(shape)
 
     def reset(self, map_name: str | None = None, mode: str = "survival") -> dict[str, Any]:
         """Load a map and start a match. Returns the initial observation."""

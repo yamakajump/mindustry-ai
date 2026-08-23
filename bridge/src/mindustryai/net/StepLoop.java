@@ -33,6 +33,10 @@ public class StepLoop implements ApplicationListener {
 
     private final BridgeServer server;
     private final Clock clock;
+    private final ObservationEncoder encoder = new ObservationEncoder();
+
+    /** Whether the agent asked for spatial tensors. Off by default: they are large. */
+    private boolean sendTensor;
 
     /**
      * Frames a step may span before it is abandoned.
@@ -82,7 +86,7 @@ public class StepLoop implements ApplicationListener {
             if (ticksRemaining <= 0) {
                 stepping = false;
                 freeze();
-                server.reply(observation(true).toString());
+                respond(observation(true));
                 return;
             }
 
@@ -124,10 +128,10 @@ public class StepLoop implements ApplicationListener {
 
         try {
             switch (command.asString()) {
-                case "hello" -> handleHello();
+                case "hello" -> handleHello(message);
                 case "reset" -> handleReset(message);
                 case "step" -> handleStep(message);
-                case "observe" -> server.reply(observation(false).toString());
+                case "observe" -> respond(observation(false));
                 case "close" -> handleClose();
                 default -> server.reply(error("unknown command: " + command.asString()));
             }
@@ -137,13 +141,23 @@ public class StepLoop implements ApplicationListener {
         }
     }
 
-    private void handleHello() {
+    private void handleHello(Jval message) {
+        if (message.get("tensor") != null) {
+            sendTensor = message.get("tensor").asBool();
+        }
         Jval reply = Jval.newObject();
         reply.put("ok", true);
         reply.put("protocol", Protocol.VERSION);
         reply.put("bridge", mindustryai.BridgePlugin.VERSION);
         reply.put("mindustry", Version.build + "." + Version.revision);
         reply.put("clock", clock.isOperational() ? "ok" : "degraded");
+        reply.put("tensor", sendTensor);
+
+        Jval names = Jval.newArray();
+        for (String channel : encoder.channels()) {
+            names.asArray().add(Jval.valueOf(channel));
+        }
+        reply.put("channels", names);
         server.reply(reply.toString());
     }
 
@@ -170,8 +184,9 @@ public class StepLoop implements ApplicationListener {
             Vars.netServer.openServer();
         }
 
+        encoder.rebuild();
         freeze();
-        server.reply(observation(false).toString());
+        respond(observation(false));
     }
 
     private void handleStep(Jval message) {
@@ -255,6 +270,43 @@ public class StepLoop implements ApplicationListener {
         }
 
         return obs;
+    }
+
+    /**
+     * Send an observation, with the spatial tensor attached when the agent asked for it.
+     *
+     * <p>The JSON frame always carries the tensor's shape and dtype, so the client knows
+     * how to read the binary frame that follows without hardcoding the layout.
+     */
+    private void respond(Jval obs) {
+        if (!sendTensor || !Vars.state.isGame()) {
+            server.reply(obs.toString());
+            return;
+        }
+
+        byte[] tensor = encoder.encode();
+
+        Jval shape = Jval.newArray();
+        shape.asArray().add(Jval.valueOf(encoder.channels().length));
+        shape.asArray().add(Jval.valueOf(encoder.height()));
+        shape.asArray().add(Jval.valueOf(encoder.width()));
+
+        // Channel names travel with every tensor, not just with the handshake. Ore
+        // channels only exist once a map is loaded, so a list captured at hello time
+        // describes a layout that no longer matches what is being sent.
+        Jval names = Jval.newArray();
+        for (String channel : encoder.channels()) {
+            names.asArray().add(Jval.valueOf(channel));
+        }
+
+        Jval spec = Jval.newObject();
+        spec.put("shape", shape);
+        spec.put("dtype", "uint8");
+        spec.put("bytes", tensor.length);
+        spec.put("channels", names);
+        obs.put("tensor", spec);
+
+        server.reply(obs.toString(), tensor);
     }
 
     private String error(String reason) {

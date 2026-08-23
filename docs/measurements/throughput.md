@@ -89,8 +89,24 @@ the correct place for the time to go.
 realtime. Fewer ticks per step buys control the game does not reward; more starts losing
 game time ratio while making the agent blind for longer.
 
-These numbers exclude observation encoding, which does not exist yet. Spatial tensors will
-take their cut, and this table should be re-measured when they land.
+### With spatial observations attached
+
+Same setup, but the agent negotiated tensors at handshake. `Ancient_Caldera` is 256x256,
+and with 14 channels that is 896 KB per observation.
+
+| | Steps/s | Per step | Throughput |
+|---|---|---|---|
+| Scalars only | 2,247 | 0.43 ms | negligible |
+| With 896 KB tensor | 481 | 2.08 ms | 442 MB/s |
+
+Encoding and shipping the world costs 4.7x the step rate, which is the honest price of
+letting the agent see. It also scales with map area, so the 32x32 and 64x64 maps the early
+curriculum uses are far cheaper: the same tensor there is 14 KB rather than 896 KB.
+
+Full maps at full speed are the case that will not hold. 300x300 at 2,000 steps per second
+would need 3.6 GB/s, which is not happening. The answers when it becomes binding are
+delta encoding, a local window around the agent, or simply accepting the lower step rate
+that a developed base imposes anyway. Not solved, because it is not yet a problem.
 
 ## What this implies
 
