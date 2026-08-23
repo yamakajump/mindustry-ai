@@ -41,11 +41,13 @@ replays/
 !replays/showcase/
 saves/
 *.msav
-# Serveurs de test et de mesure, provisionnes a la demande
-mindustry-server/
-mindustry-bench/
+# Serveurs de test et de mesure, provisionnes a la demande.
+# Motif large volontairement : un dossier ponctuel oublie finit sinon dans un commit.
+mindustry-*/
+!mindustry-ai/
 Mindustry-reference/
-dump.txt
+*.txt
+!requirements*.txt
 
 # ---------- IDE et OS ----------
 .idea/
