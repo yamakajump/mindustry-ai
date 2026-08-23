@@ -93,12 +93,14 @@ Building a factory that pays off in ten minutes is exactly a high-gamma problem.
 Ordered by dependency, not by excitement.
 
 - [ ] **Bridge.** A JVM mod that exposes game state and accepts actions from outside the process.
-- [ ] **Environment.** A Gymnasium-compatible wrapper: observation space, action space, reward, fast reset.
+- [ ] **Throughput benchmark.** Measured ticks per second per instance. This number decides what is trainable at all.
+- [ ] **Environment.** A Gymnasium-compatible wrapper: observations, factored masked actions, reward, fast reset.
 - [ ] **Replays.** An event log format, and a web viewer that replays a match tile by tile.
-- [ ] **Alpha.** The scripted baseline, and a benchmark suite to score anything against it.
-- [ ] **Beta.** First learned agent. Survival mode, single map, beat Alpha.
+- [ ] **Alpha.** The scripted baseline, and the curriculum benchmark to score anything against it.
+- [ ] **Beta.** First learned agent. Clears the early curriculum stages and beats Alpha on them.
+- [ ] **Full games.** Survival on real maps, the whole economy and defence loop.
 - [ ] **Generalisation.** Procedurally generated maps, so the agent learns to play rather than to memorise.
-- [ ] **Self-play.** PvP and attack modes, agents trained against each other.
+- [ ] **Self-play.** Attack and PvP modes, agents trained against each other.
 - [ ] **Gamma.** Beat humans.
 
 ## Prior art
