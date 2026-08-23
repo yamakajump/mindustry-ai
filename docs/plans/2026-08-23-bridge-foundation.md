@@ -1,5 +1,25 @@
 # Bridge Foundation Implementation Plan
 
+> **Status: completed** on 2026-08-23, merged in [#1](https://github.com/yamakajump/mindustry-ai/pull/1).
+> Kept as written, including the parts reality contradicted, because the reasoning that
+> led somewhere better is worth more than a plan retconned to look prescient.
+>
+> **What diverged.** Task 4 was framed as an investigation across three hypotheses, all of
+> which turned out to be unnecessary. Reading the engine source first revealed that
+> `Core.graphics` is a replaceable field, which makes a fixed timestep possible in one
+> move and keeps the simulation strictly more correct than stock, rather than degrading it
+> to buy speed as hypotheses A and B both would have. See
+> [decision 6](../decisions/0006-fixed-timestep-acceleration.md).
+>
+> **What the plan got right.** Insisting on a real-server integration harness before any
+> game code. Two bugs surfaced only because tests ran against an actual process: number
+> formatting that followed the French locale and emitted decimal commas, and a `wait_for`
+> that could return the reply to an earlier command. A third, ANSI colour codes present on
+> Linux but not Windows, was caught only by CI.
+>
+> **Measured result:** 592x realtime on one instance, 4,806x aggregate across 24. See
+> [throughput.md](../measurements/throughput.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A pinned Mindustry headless server running our own plugin, scriptable from Python, with a measured answer to the question that governs the whole project: how many game ticks per second can one instance actually produce?

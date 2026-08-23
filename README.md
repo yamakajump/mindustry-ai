@@ -104,6 +104,35 @@ Ordered by dependency, not by excitement.
 - [ ] **Self-play.** Attack and PvP modes, agents trained against each other.
 - [ ] **Gamma.** Beat humans.
 
+## Development
+
+Requires **Java 17** and **Python 3.13**. Nothing else: the Mindustry server is downloaded
+on demand, pinned to `v159.7`, and Gradle arrives through the wrapper.
+
+```bash
+python -m venv .venv
+.venv/Scripts/python -m pip install pytest    # .venv/bin/python on Linux and macOS
+.venv/Scripts/python -m pytest tests/ -v
+```
+
+The tests start real Mindustry servers and drive them through stdin. There are no mocks,
+because engine state only exists inside a running engine and a mock of it would assert
+nothing. A full run takes about 70 seconds.
+
+To reproduce the throughput figures:
+
+```bash
+cd bridge && ./gradlew jar && cd ..
+.venv/Scripts/python tools/measure_throughput.py --window 5
+```
+
+Add `--skip-scaling` to measure a single instance only. Results and their caveats live in
+[`docs/measurements/throughput.md`](docs/measurements/throughput.md).
+
+Once a server is running with the plugin installed, three console commands are available:
+`bridge-status` reports version, clock state, tick and wave; `bridge-bench <seconds>`
+measures throughput over a window; `bridge-speed <n|max>` sets simulation speed.
+
 ## Prior art
 
 Several people have started down this road. None have arrived, which is the main reason
