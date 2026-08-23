@@ -4,7 +4,8 @@ build/
 out/
 *.class
 *.jar
-!gradle/wrapper/gradle-wrapper.jar
+# Le wrapper doit etre versionne pour que le build soit reproductible sans Gradle installe
+!**/gradle/wrapper/gradle-wrapper.jar
 bin/
 
 # ---------- Python ----------
@@ -40,7 +41,11 @@ replays/
 !replays/showcase/
 saves/
 *.msav
+# Serveurs de test et de mesure, provisionnes a la demande
 mindustry-server/
+mindustry-bench/
+Mindustry-reference/
+dump.txt
 
 # ---------- IDE et OS ----------
 .idea/

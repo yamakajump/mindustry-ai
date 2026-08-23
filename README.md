@@ -49,7 +49,7 @@ Being honest about the difficulty up front, because it shapes every design decis
 | Obstacle | Why it hurts |
 |---|---|
 | **Enormous action space** | Roughly 200 block types, on maps up to 500x500 tiles, times rotation and configuration, plus per-unit commands. Wider than StarCraft II. |
-| **Slow simulation** | Mindustry simulates thousands of blocks and item movements per tick. Even uncapped, expect tens of times realtime per instance, not thousands. Sample-hungry algorithms will feel it. |
+| **Slow simulation** | Mindustry simulates thousands of blocks and item movements per tick, and cost grows with the factory. Less of a problem than expected: [measured](docs/measurements/throughput.md) at 592x realtime per instance on an empty map. |
 | **No thread safety** | The engine is single threaded by design. Parallelism means many JVM processes, not many threads. |
 | **Sparse, delayed reward** | The payoff for a good factory arrives minutes after the decisions that built it. |
 | **Nothing was built for this** | No observation API, no fast reset, no metrics. That plumbing is most of the work. |
@@ -92,8 +92,9 @@ Building a factory that pays off in ten minutes is exactly a high-gamma problem.
 
 Ordered by dependency, not by excitement.
 
-- [ ] **Bridge.** A JVM mod that exposes game state and accepts actions from outside the process.
-- [ ] **Throughput benchmark.** Measured ticks per second per instance. This number decides what is trainable at all.
+- [x] **Bridge foundation.** A JVM plugin loaded by the headless server, driven from Python, with simulation speed under control.
+- [x] **Throughput benchmark.** [Measured](docs/measurements/throughput.md): 592x realtime on one instance, 4,806x across 24.
+- [ ] **Bridge protocol.** A socket the environment talks to, instead of server console commands.
 - [ ] **Environment.** A Gymnasium-compatible wrapper: observations, factored masked actions, reward, fast reset.
 - [ ] **Replays.** An event log format, and a web viewer that replays a match tile by tile.
 - [ ] **Alpha.** The scripted baseline, and the curriculum benchmark to score anything against it.
