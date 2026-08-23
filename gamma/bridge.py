@@ -30,7 +30,7 @@ class BridgeError(RuntimeError):
 class Bridge:
     """A connection to one Mindustry instance."""
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 7654, timeout: float = 120.0) -> None:
+    def __init__(self, host: str = "127.0.0.1", port: int = 7654, timeout: float = 60.0) -> None:
         self.host = host
         self.port = port
         self.timeout = timeout

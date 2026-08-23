@@ -61,6 +61,9 @@ def bridge_server(tmp_path_factory: pytest.TempPathFactory, bridge_jar: Path):
         port=GAME_PORT,
     ) as server:
         server.wait_for(rf"listening on 127\.0\.0\.1:{BRIDGE_PORT}", timeout=60)
+        # Run at the speed the environment will actually use. At 1x a 300 tick step
+        # costs five real seconds, which made the CI run take minutes per test.
+        server.command("bridge-speed max", r"speed set")
         yield server
 
 

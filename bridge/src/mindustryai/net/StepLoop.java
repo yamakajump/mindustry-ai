@@ -34,8 +34,20 @@ public class StepLoop implements ApplicationListener {
     private final BridgeServer server;
     private final Clock clock;
 
+    /**
+     * Frames a step may span before it is abandoned.
+     *
+     * <p>A step only completes when the world actually runs, so anything that stops it
+     * running (a game over, a state the bridge did not anticipate) would otherwise leave
+     * {@code stepping} true forever. While stepping, requests are not consumed, so a stuck
+     * step does not fail one call: it wedges the whole connection, and the agent sees an
+     * unexplained timeout. Bounding it turns that into an error message.
+     */
+    private static final int STEP_FRAME_BUDGET = 60 * 60;
+
     private int ticksRemaining;
     private boolean stepping;
+    private int framesSpentStepping;
 
     /** The connection a step in progress belongs to. See {@link BridgeServer#session()}. */
     private int steppingSession;
@@ -66,10 +78,25 @@ public class StepLoop implements ApplicationListener {
             if (!Vars.state.isPaused() && Vars.state.isPlaying()) {
                 ticksRemaining--;
             }
+
             if (ticksRemaining <= 0) {
                 stepping = false;
                 freeze();
                 server.reply(observation(true).toString());
+                return;
+            }
+
+            if (++framesSpentStepping > STEP_FRAME_BUDGET) {
+                stepping = false;
+                freeze();
+                Log.warn("[mindustry-ai] step abandoned after @ frames with @ ticks left, "
+                    + "playing=@ paused=@ gameOver=@",
+                    framesSpentStepping, ticksRemaining,
+                    Vars.state.isPlaying(), Vars.state.isPaused(), Vars.state.gameOver);
+                server.reply(error("step did not complete: the world stopped advancing"
+                    + " (playing=" + Vars.state.isPlaying()
+                    + " paused=" + Vars.state.isPaused()
+                    + " gameOver=" + Vars.state.gameOver + ")"));
             }
             return;
         }
@@ -139,7 +166,9 @@ public class StepLoop implements ApplicationListener {
         Vars.world.loadMap(map, map.applyRules(mode));
         Vars.state.rules = map.applyRules(mode);
         Vars.logic.play();
-        Vars.netServer.openServer();
+        if (!Vars.net.server()) {
+            Vars.netServer.openServer();
+        }
 
         freeze();
         server.reply(observation(false).toString());
@@ -158,13 +187,15 @@ public class StepLoop implements ApplicationListener {
         }
 
         ticksRemaining = repeat;
+        framesSpentStepping = 0;
         steppingSession = server.session();
         stepping = true;
         unfreeze();
     }
 
     private void handleClose() {
-        unfreeze();
+        // Deliberately leaves the world frozen. Resuming it would let the map run on
+        // between episodes, burning CPU and drifting the state a later reset inherits.
         Jval reply = Jval.newObject();
         reply.put("ok", true);
         server.reply(reply.toString());
