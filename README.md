@@ -54,6 +54,23 @@ Being honest about the difficulty up front, because it shapes every design decis
 | **Sparse, delayed reward** | The payoff for a good factory arrives minutes after the decisions that built it. |
 | **Nothing was built for this** | No observation API, no fast reset, no metrics. That plumbing is most of the work. |
 
+## How it works
+
+Three processes, split by language boundary. A JVM mod inside the Mindustry headless
+server exposes state and executes actions. A Python package holds the Gymnasium
+environment and the training loop. A static web viewer replays matches.
+
+The design choice that matters most: **the agent can perform every action a human player
+can**, with no hand-written vocabulary capping what it is allowed to try. That space is
+made learnable by factoring one action into dependent components with their own network
+heads, and by masking every head to legal choices computed by the engine itself. Scripted
+macros exist, but as one action among many rather than as the whole repertoire, so nothing
+stops the agent from ignoring them and inventing something better.
+
+Full details in [`docs/architecture.md`](docs/architecture.md). The reasoning behind each
+choice, including the alternatives that were rejected, is in
+[`docs/decisions/`](docs/decisions/).
+
 ## Milestones
 
 Mindustry players do not have a fixed avatar. They embody a core unit that upgrades with
