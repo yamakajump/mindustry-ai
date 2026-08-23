@@ -1,0 +1,55 @@
+# ---------- Java / Gradle ----------
+.gradle/
+build/
+out/
+*.class
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+bin/
+
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ---------- Node / web ----------
+node_modules/
+.next/
+.vite/
+*.tsbuildinfo
+
+# ---------- Machine learning ----------
+# Poids, checkpoints et logs d'entrainement : trop lourds pour git
+checkpoints/
+runs/
+wandb/
+*.pt
+*.pth
+*.onnx
+
+# ---------- Donnees de jeu et replays ----------
+# Les replays bruts sont volumineux, seuls les extraits de demo sont versionnes
+replays/
+!replays/showcase/
+saves/
+*.msav
+mindustry-server/
+
+# ---------- IDE et OS ----------
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# ---------- Local ----------
+.env
+.env.local
+.claude/projet/
