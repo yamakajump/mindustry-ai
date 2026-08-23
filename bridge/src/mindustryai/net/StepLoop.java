@@ -34,6 +34,10 @@ public class StepLoop implements ApplicationListener {
     private final BridgeServer server;
     private final Clock clock;
     private final ObservationEncoder encoder = new ObservationEncoder();
+    private final ActionExecutor actions = new ActionExecutor();
+
+    /** Outcome of the action carried by the last step, reported in its observation. */
+    private ActionExecutor.Result lastAction;
 
     /** Whether the agent asked for spatial tensors. Off by default: they are large. */
     private boolean sendTensor;
@@ -131,6 +135,8 @@ public class StepLoop implements ApplicationListener {
                 case "hello" -> handleHello(message);
                 case "reset" -> handleReset(message);
                 case "step" -> handleStep(message);
+                case "act" -> handleAct(message);
+                case "blocks" -> handleBlocks();
                 case "observe" -> respond(observation(false));
                 case "close" -> handleClose();
                 default -> server.reply(error("unknown command: " + command.asString()));
@@ -201,11 +207,57 @@ public class StepLoop implements ApplicationListener {
             return;
         }
 
+        lastAction = message.get("action") == null ? null : apply(message.get("action"));
+
         ticksRemaining = repeat;
         framesSpentStepping = 0;
         steppingSession = server.session();
         stepping = true;
         unfreeze();
+    }
+
+    private void handleAct(Jval message) {
+        if (!Vars.state.isGame()) {
+            server.reply(error("no game in progress, send reset first"));
+            return;
+        }
+        lastAction = apply(message.get("action"));
+        respond(observation(false));
+    }
+
+    private void handleBlocks() {
+        Jval reply = Jval.newObject();
+        reply.put("ok", true);
+        reply.put("affordable", actions.affordableBlocks());
+        server.reply(reply.toString());
+    }
+
+    /** Decode and apply one action. Never throws: an illegal action is data, not a fault. */
+    private ActionExecutor.Result apply(Jval action) {
+        if (action == null) {
+            return null;
+        }
+        Jval kind = action.get("type");
+        if (kind == null) {
+            return new ActionExecutor.Result(false, "action is missing 'type'");
+        }
+
+        try {
+            return switch (kind.asString()) {
+                case "noop" -> new ActionExecutor.Result(true, null);
+                case "place" -> actions.place(
+                    action.get("block").asString(),
+                    action.get("x").asInt(),
+                    action.get("y").asInt(),
+                    action.get("rotation") == null ? 0 : action.get("rotation").asInt());
+                case "break" -> actions.destroy(
+                    action.get("x").asInt(),
+                    action.get("y").asInt());
+                default -> new ActionExecutor.Result(false, "unknown action: " + kind.asString());
+            };
+        } catch (Exception e) {
+            return new ActionExecutor.Result(false, e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
     }
 
     private void handleClose() {
@@ -247,6 +299,15 @@ public class StepLoop implements ApplicationListener {
         obs.put("wave_time", Vars.state.wavetime);
         obs.put("enemies", Vars.state.enemies);
         obs.put("game_over", Vars.state.gameOver);
+
+        if (lastAction != null) {
+            Jval outcome = Jval.newObject();
+            outcome.put("applied", lastAction.applied());
+            if (lastAction.reason() != null) {
+                outcome.put("reason", lastAction.reason());
+            }
+            obs.put("action", outcome);
+        }
 
         if (playing && Vars.state.rules != null) {
             var core = Vars.state.rules.defaultTeam.core();

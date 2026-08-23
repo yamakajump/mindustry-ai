@@ -10,7 +10,6 @@ import time
 import pytest
 
 from gamma.bridge import PROTOCOL_VERSION, Bridge, BridgeError
-from tests.conftest import BRIDGE_PORT
 
 
 def test_handshake_reports_versions(bridge: Bridge) -> None:
@@ -87,7 +86,7 @@ def test_malformed_json_does_not_kill_the_connection(bridge: Bridge) -> None:
     assert bridge.request({"cmd": "hello"})["ok"] is True
 
 
-def test_disconnecting_mid_step_does_not_poison_the_next_client(bridge_server) -> None:
+def test_disconnecting_mid_step_does_not_poison_the_next_client(bridge_server, bridge_ports) -> None:
     """Regression test.
 
     A step spans many ticks, so an agent can vanish while one is still running. If the
@@ -96,7 +95,7 @@ def test_disconnecting_mid_step_does_not_poison_the_next_client(bridge_server) -
     the session dies on a timeout with nothing in the logs explaining why. Found on CI,
     where the machine was slow enough to make the race reliable.
     """
-    victim = Bridge(port=BRIDGE_PORT, timeout=30.0)
+    victim = Bridge(port=bridge_ports[0], timeout=30.0)
     victim.connect()
     victim.reset("Ancient_Caldera", "survival")
 
@@ -106,7 +105,7 @@ def test_disconnecting_mid_step_does_not_poison_the_next_client(bridge_server) -
     victim._sock.close()
     victim._sock = None
 
-    with Bridge(port=BRIDGE_PORT, timeout=30.0) as successor:
+    with Bridge(port=bridge_ports[0], timeout=30.0) as successor:
         hello = successor.request({"cmd": "hello"})
         assert "protocol" in hello, f"got a stale reply meant for the previous agent: {hello}"
 
@@ -115,7 +114,7 @@ def test_disconnecting_mid_step_does_not_poison_the_next_client(bridge_server) -
         assert "tick" in observed
 
 
-def test_oversized_frame_is_refused(bridge_server) -> None:
+def test_oversized_frame_is_refused(bridge_server, bridge_ports) -> None:
     """Guards against a length prefix being trusted enough to allocate from.
 
     Uses its own short-timeout connection rather than the shared fixture. The bridge
@@ -124,12 +123,12 @@ def test_oversized_frame_is_refused(bridge_server) -> None:
     reader waiting until it times out. A dedicated socket keeps that cost bounded and
     stops a deliberately broken connection from leaking into later tests.
     """
-    with Bridge(port=BRIDGE_PORT, timeout=10.0) as probe:
+    with Bridge(port=bridge_ports[0], timeout=10.0) as probe:
         assert probe._sock is not None
         probe._sock.sendall(struct.pack(">BI", 0, 2**30 + 1))
         with pytest.raises((ConnectionError, OSError, TimeoutError, socket.timeout)):
             probe._receive()
 
     # The server must still take new connections after refusing that frame.
-    with Bridge(port=BRIDGE_PORT, timeout=30.0) as after:
+    with Bridge(port=bridge_ports[0], timeout=30.0) as after:
         assert after.request({"cmd": "hello"})["ok"] is True

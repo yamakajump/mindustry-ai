@@ -44,23 +44,47 @@ def hosting_server(server_with_plugin: Path):
         yield server
 
 
-# Ports used only by the protocol tests. Distinct from the defaults so a stray server
-# left over from an earlier run cannot silently satisfy a connection.
-BRIDGE_PORT = 7801
-GAME_PORT = 6801
+# Base ports, offset per test module. Two modules holding module-scoped servers can
+# overlap during teardown, and sharing one port makes the newcomer fail to listen while
+# its client silently connects to the outgoing server. Distinct from the defaults too,
+# so a stray process from an earlier run cannot quietly satisfy a connection.
+BRIDGE_PORT_BASE = 7810
+GAME_PORT_BASE = 6810
+
+# Deliberately explicit rather than hashed: a port collision is painful to diagnose, and
+# a reader should be able to see which module owns which port.
+_MODULE_PORT_OFFSETS = {
+    "test_bridge_protocol": 0,
+    "test_observations": 1,
+    "test_actions": 2,
+}
+
+BRIDGE_PORT = BRIDGE_PORT_BASE
+"""Default for tests that do not care. Real ports come from the fixture."""
+
+
+def _ports_for(module_name: str) -> tuple[int, int]:
+    offset = _MODULE_PORT_OFFSETS.get(module_name.rsplit(".", 1)[-1], 9)
+    return BRIDGE_PORT_BASE + offset, GAME_PORT_BASE + offset
 
 
 @pytest.fixture(scope="module")
-def bridge_server(tmp_path_factory: pytest.TempPathFactory, bridge_jar: Path):
-    """A server whose agent socket is listening, shared across the protocol tests."""
+def bridge_ports(request) -> tuple[int, int]:
+    return _ports_for(request.module.__name__)
+
+
+@pytest.fixture(scope="module")
+def bridge_server(tmp_path_factory: pytest.TempPathFactory, bridge_jar: Path, bridge_ports):
+    """A server whose agent socket is listening, shared across one module."""
+    bridge_port, game_port = bridge_ports
     server_dir = setup_server(tmp_path_factory.mktemp("mindustry-bridge"))
     install_plugin(server_dir, bridge_jar)
     with ServerProcess(
         server_dir,
-        jvm_args=[f"-Dmindustryai.port={BRIDGE_PORT}"],
-        port=GAME_PORT,
+        jvm_args=[f"-Dmindustryai.port={bridge_port}"],
+        port=game_port,
     ) as server:
-        server.wait_for(rf"listening on 127\.0\.0\.1:{BRIDGE_PORT}", timeout=60)
+        server.wait_for(rf"listening on 127\.0\.0\.1:{bridge_port}", timeout=60)
         # Run at the speed the environment will actually use. At 1x a 300 tick step
         # costs five real seconds, which made the CI run take minutes per test.
         server.command("bridge-speed max", r"speed set")
@@ -68,7 +92,7 @@ def bridge_server(tmp_path_factory: pytest.TempPathFactory, bridge_jar: Path):
 
 
 @pytest.fixture
-def bridge(bridge_server) -> Bridge:
+def bridge(bridge_server, bridge_ports) -> Bridge:
     """A fresh connection per test, so one test's state cannot leak into the next."""
-    with Bridge(port=BRIDGE_PORT) as client:
+    with Bridge(port=bridge_ports[0]) as client:
         yield client

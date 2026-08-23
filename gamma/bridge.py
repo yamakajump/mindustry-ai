@@ -178,9 +178,39 @@ class Bridge:
             message["map"] = map_name
         return self.request(message)
 
-    def step(self, repeat: int = 15) -> dict[str, Any]:
-        """Advance the world by `repeat` ticks and return the resulting observation."""
-        return self.request({"cmd": "step", "repeat": repeat})
+    def step(
+        self, repeat: int = 15, action: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Apply an action, advance the world by `repeat` ticks, return the observation.
+
+        The action is applied before the world runs, so its effect is visible in the
+        observation that comes back. An illegal action is reported in `obs["action"]`
+        rather than raised: rejection is a normal outcome for an agent that is still
+        learning what is legal, not an error in the episode.
+        """
+        message: dict[str, Any] = {"cmd": "step", "repeat": repeat}
+        if action is not None:
+            message["action"] = action
+        return self.request(message)
+
+    def act(self, action: dict[str, Any]) -> dict[str, Any]:
+        """Apply an action without advancing the world."""
+        return self.request({"cmd": "act", "action": action})
+
+    def place(self, block: str, x: int, y: int, rotation: int = 0, repeat: int = 15):
+        """Place a block, then let the world run."""
+        return self.step(
+            repeat=repeat,
+            action={"type": "place", "block": block, "x": x, "y": y, "rotation": rotation},
+        )
+
+    def demolish(self, x: int, y: int, repeat: int = 15) -> dict[str, Any]:
+        """Remove a block, then let the world run."""
+        return self.step(repeat=repeat, action={"type": "break", "x": x, "y": y})
+
+    def affordable_blocks(self) -> list[str]:
+        """Blocks the core can currently pay for. The mask for the block head."""
+        return self.request({"cmd": "blocks"})["affordable"]
 
     def observe(self) -> dict[str, Any]:
         """Read current state without advancing the world."""

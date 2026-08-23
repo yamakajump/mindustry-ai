@@ -5,4 +5,7 @@ testpaths = ["tests"]
 # stuck read hangs the whole run, which on CI means a job that burns its budget
 # instead of reporting which test is at fault.
 timeout = 180
-addopts = "-ra"
+addopts = "-ra -m 'not perf'"
+markers = [
+    "perf: throughput measurements, skewed by anything else running. Run alone.",
+]
