@@ -37,7 +37,9 @@ wandb/
 
 # ---------- Donnees de jeu et replays ----------
 # Les replays bruts sont volumineux, seuls les extraits de demo sont versionnes
-replays/
+# Git ne descend pas dans un dossier exclu, donc l'exclusion porte sur le contenu
+# et pas sur le dossier : sinon les exceptions ci-dessous seraient inertes.
+replays/*
 !replays/showcase/
 saves/
 *.msav

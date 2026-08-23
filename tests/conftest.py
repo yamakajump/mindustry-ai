@@ -10,7 +10,9 @@ import pytest
 
 from gamma.server import ServerProcess, install_plugin
 from gamma.server_setup import setup_server
+from gamma import tasks
 from gamma.bridge import Bridge
+from gamma.env import MindustryEnv
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BRIDGE = REPO_ROOT / "bridge"
@@ -96,3 +98,25 @@ def bridge(bridge_server, bridge_ports) -> Bridge:
     """A fresh connection per test, so one test's state cannot leak into the next."""
     with Bridge(port=bridge_ports[0]) as client:
         yield client
+
+
+ENV_BRIDGE_PORT = 7860
+ENV_GAME_PORT = 6860
+
+
+@pytest.fixture(scope="session")
+def env(tmp_path_factory: pytest.TempPathFactory, bridge_jar: Path):
+    """One environment for the whole session: starting a server per test would dominate."""
+    environment = MindustryEnv(
+        tasks.T1_COPPER,
+        server_dir=str(tmp_path_factory.mktemp("mindustry-env")),
+        bridge_port=ENV_BRIDGE_PORT,
+        game_port=ENV_GAME_PORT,
+        jar=str(bridge_jar),
+    )
+    try:
+        yield environment
+    finally:
+        environment.close()
+
+
