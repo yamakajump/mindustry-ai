@@ -68,15 +68,24 @@ class Bridge:
         return hello
 
     def close(self) -> None:
+        """Say goodbye if possible, then drop the socket regardless.
+
+        The goodbye uses a short timeout of its own: on an already broken connection the
+        normal one would stall teardown for minutes, and a close that hangs is worse than
+        a close that skips the courtesy.
+        """
         if self._sock is None:
             return
         try:
+            self._sock.settimeout(2.0)
             self.request({"cmd": "close"})
         except Exception:
             pass
         finally:
-            self._sock.close()
-            self._sock = None
+            try:
+                self._sock.close()
+            finally:
+                self._sock = None
 
     def __enter__(self) -> Bridge:
         self.connect()

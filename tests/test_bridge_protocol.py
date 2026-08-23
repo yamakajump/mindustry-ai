@@ -10,6 +10,7 @@ import time
 import pytest
 
 from gamma.bridge import PROTOCOL_VERSION, Bridge, BridgeError
+from tests.conftest import BRIDGE_PORT
 
 
 def test_handshake_reports_versions(bridge: Bridge) -> None:
@@ -86,10 +87,21 @@ def test_malformed_json_does_not_kill_the_connection(bridge: Bridge) -> None:
     assert bridge.request({"cmd": "hello"})["ok"] is True
 
 
-def test_oversized_frame_is_refused(bridge: Bridge) -> None:
-    """Guards against a length prefix being trusted enough to allocate from."""
-    assert bridge._sock is not None
-    bridge._sock.sendall(struct.pack(">BI", 0, 2**30 + 1))
-    with pytest.raises((ConnectionError, OSError, socket.timeout)):
-        bridge._receive()
-        bridge.request({"cmd": "hello"})
+def test_oversized_frame_is_refused(bridge_server) -> None:
+    """Guards against a length prefix being trusted enough to allocate from.
+
+    Uses its own short-timeout connection rather than the shared fixture. The bridge
+    answers by dropping the connection, and how quickly that surfaces to the client
+    depends on the platform: Windows delivers a reset immediately, Linux can leave the
+    reader waiting until it times out. A dedicated socket keeps that cost bounded and
+    stops a deliberately broken connection from leaking into later tests.
+    """
+    with Bridge(port=BRIDGE_PORT, timeout=10.0) as probe:
+        assert probe._sock is not None
+        probe._sock.sendall(struct.pack(">BI", 0, 2**30 + 1))
+        with pytest.raises((ConnectionError, OSError, TimeoutError, socket.timeout)):
+            probe._receive()
+
+    # The server must still take new connections after refusing that frame.
+    with Bridge(port=BRIDGE_PORT, timeout=30.0) as after:
+        assert after.request({"cmd": "hello"})["ok"] is True
