@@ -94,7 +94,8 @@ Ordered by dependency, not by excitement.
 
 - [x] **Bridge foundation.** A JVM plugin loaded by the headless server, driven from Python, with simulation speed under control.
 - [x] **Throughput benchmark.** [Measured](docs/measurements/throughput.md): 592x realtime on one instance, 4,806x across 24.
-- [ ] **Bridge protocol.** A socket the environment talks to, instead of server console commands.
+- [x] **Bridge protocol.** A socket speaking length-prefixed frames, with the world frozen between decisions. [Measured](docs/measurements/throughput.md) at 2,247 decisions/s.
+- [ ] **Observations.** Spatial tensors and the global vector, on the binary frame type.
 - [ ] **Environment.** A Gymnasium-compatible wrapper: observations, factored masked actions, reward, fast reset.
 - [ ] **Replays.** An event log format, and a web viewer that replays a match tile by tile.
 - [ ] **Alpha.** The scripted baseline, and the curriculum benchmark to score anything against it.
@@ -129,9 +130,25 @@ cd bridge && ./gradlew jar && cd ..
 Add `--skip-scaling` to measure a single instance only. Results and their caveats live in
 [`docs/measurements/throughput.md`](docs/measurements/throughput.md).
 
-Once a server is running with the plugin installed, three console commands are available:
+Once a server is running with the plugin installed, console commands are available:
 `bridge-status` reports version, clock state, tick and wave; `bridge-bench <seconds>`
-measures throughput over a window; `bridge-speed <n|max>` sets simulation speed.
+measures throughput over a window; `bridge-speed <n|max>` sets simulation speed;
+`bridge-port` reports the agent socket.
+
+Driving a game from Python:
+
+```python
+from gamma.bridge import Bridge
+
+with Bridge(port=7654) as bridge:
+    bridge.reset("Ancient_Caldera", "survival")
+    for _ in range(100):
+        obs = bridge.step(repeat=30)     # world runs 30 ticks, then freezes again
+        print(obs["tick"], obs["wave"], obs["items"])
+```
+
+The port defaults to 7654 and is set per instance with `-Dmindustryai.port=N`, which is how
+parallel environments avoid colliding.
 
 ## Prior art
 

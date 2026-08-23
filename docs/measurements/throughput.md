@@ -65,6 +65,33 @@ Per-instance throughput falls as instances are added, which is expected: 24 JVMs
 physical cores contend for cores, memory bandwidth and cache. Aggregate throughput still
 rises by 6.5x, and aggregate is what matters for filling a training batch.
 
+## Agent decisions per second
+
+Raw ticks flatter the system, because they ignore what an environment actually costs: a
+socket round trip, pausing and unpausing the world, and only then the ticks. This is the
+figure that governs training. Reproduce with `python tools/measure_steps.py`.
+
+300 steps per row, single instance at `max` speed, world frozen between decisions.
+
+| Ticks per step | Steps/s | Game time ratio | Median latency | p99 |
+|---|---|---|---|---|
+| 1 | 4,052 | 67.5x | 0.21 ms | 0.75 ms |
+| 5 | 3,069 | 255.8x | 0.31 ms | 0.59 ms |
+| 15 | 2,247 | 561.7x | 0.43 ms | 0.67 ms |
+| 30 | 1,327 | 663.6x | 0.73 ms | 1.07 ms |
+| 60 | 597 | 597.0x | 1.24 ms | 9.12 ms |
+
+The protocol overhead is negligible: a step advancing a single tick costs 0.21 ms in
+total, round trip and pause cycle included. What costs is the simulation itself, which is
+the correct place for the time to go.
+
+**30 ticks per decision looks like the sweet spot**, two decisions per game second at 664x
+realtime. Fewer ticks per step buys control the game does not reward; more starts losing
+game time ratio while making the agent blind for longer.
+
+These numbers exclude observation encoding, which does not exist yet. Spatial tensors will
+take their cut, and this table should be re-measured when they land.
+
 ## What this implies
 
 At 288,000 aggregate ticks per second, and a ten minute match costing 36,000 ticks:
