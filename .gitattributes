@@ -1,0 +1,20 @@
+# Normalise les fins de ligne : LF dans le depot, natif au checkout
+* text=auto
+
+# Scripts qui doivent rester en LF meme sous Windows
+*.sh text eol=lf
+gradlew text eol=lf
+
+# Scripts Windows en CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binaires : jamais de conversion
+*.png binary
+*.jpg binary
+*.gif binary
+*.mp4 binary
+*.msav binary
+*.jar binary
+*.pt binary
+*.onnx binary
