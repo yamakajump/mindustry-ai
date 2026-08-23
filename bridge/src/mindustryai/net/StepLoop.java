@@ -309,6 +309,17 @@ public class StepLoop implements ApplicationListener {
             obs.put("action", outcome);
         }
 
+        // Every field below is always present, even with no core. An observation whose
+        // keys come and go forces every consumer to guess, and a policy fed a vector that
+        // silently changes shape learns nothing useful from it.
+        Jval items = Jval.newObject();
+        obs.put("has_core", false);
+        obs.put("core_health", 0);
+        obs.put("core_x", -1);
+        obs.put("core_y", -1);
+        obs.put("map_width", Vars.world.width());
+        obs.put("map_height", Vars.world.height());
+
         if (playing && Vars.state.rules != null) {
             var core = Vars.state.rules.defaultTeam.core();
             obs.put("has_core", core != null);
@@ -317,18 +328,15 @@ public class StepLoop implements ApplicationListener {
                 obs.put("core_x", core.tileX());
                 obs.put("core_y", core.tileY());
 
-                Jval items = Jval.newObject();
                 for (var item : Vars.content.items()) {
                     int amount = core.items.get(item);
                     if (amount > 0) {
                         items.put(item.name, amount);
                     }
                 }
-                obs.put("items", items);
             }
-            obs.put("map_width", Vars.world.width());
-            obs.put("map_height", Vars.world.height());
         }
+        obs.put("items", items);
 
         return obs;
     }

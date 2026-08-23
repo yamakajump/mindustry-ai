@@ -13,8 +13,8 @@ import time
 from pathlib import Path
 
 from gamma.bridge import Bridge
-from tools.mindustry_server import ServerProcess, install_plugin
-from tools.setup_server import setup_server
+from gamma.server import ServerProcess, install_plugin
+from gamma.server_setup import setup_server
 
 BRIDGE_PORT = 7901
 GAME_PORT = 6901

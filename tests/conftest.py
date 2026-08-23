@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from tools.mindustry_server import ServerProcess, install_plugin
-from tools.setup_server import setup_server
+from gamma.server import ServerProcess, install_plugin
+from gamma.server_setup import setup_server
 from gamma.bridge import Bridge
 
 REPO_ROOT = Path(__file__).resolve().parent.parent

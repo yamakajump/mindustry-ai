@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from tools.mindustry_server import ServerProcess
-from tools.setup_server import MIN_JAR_BYTES, setup_server
+from gamma.server import ServerProcess
+from gamma.server_setup import MIN_JAR_BYTES, setup_server
 
 
 @pytest.fixture(scope="session")
