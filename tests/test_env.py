@@ -13,26 +13,6 @@ from gamma.alpha import AlphaPolicy
 from gamma.env import ACTION_TYPES, GLOBAL_FIELDS, MindustryEnv
 from gamma.policies import MaskedRandomPolicy, RandomPolicy, run_episode
 
-ENV_BRIDGE_PORT = 7860
-ENV_GAME_PORT = 6860
-
-
-@pytest.fixture(scope="module")
-def env(tmp_path_factory: pytest.TempPathFactory, bridge_jar: Path):
-    """One environment for the module. Starting a server per test would dominate."""
-    environment = MindustryEnv(
-        tasks.T1_COPPER,
-        server_dir=str(tmp_path_factory.mktemp("mindustry-env")),
-        bridge_port=ENV_BRIDGE_PORT,
-        game_port=ENV_GAME_PORT,
-        jar=str(bridge_jar),
-    )
-    try:
-        yield environment
-    finally:
-        environment.close()
-
-
 def test_spaces_are_available_before_the_first_reset(env: MindustryEnv) -> None:
     """Gymnasium callers build policies from the spaces, so asking early must work."""
     assert isinstance(env.action_space, spaces.MultiDiscrete)

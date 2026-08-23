@@ -71,6 +71,19 @@ Full details in [`docs/architecture.md`](docs/architecture.md). The reasoning be
 choice, including the alternatives that were rejected, is in
 [`docs/decisions/`](docs/decisions/).
 
+## Watch it play
+
+Replays are recorded as event logs and played back in a static page, so an agent's whole
+match can be watched in a browser with nothing installed.
+
+**[Watch Alpha build a copper chain](https://yamakajump.github.io/mindustry-ai/?replay=replays/alpha-t1.jsonl.gz)**
+ | [Watch a random policy go bankrupt](https://yamakajump.github.io/mindustry-ai/?replay=replays/random-t1.jsonl.gz)
+
+A full 450 step episode is about 8 KB, because only what changed is stored. The same
+format will carry live training over a WebSocket: the viewer cannot tell the difference
+between a file and a socket, so live viewing costs almost nothing once replay works. See
+[decision 3](docs/decisions/0003-one-replay-format.md).
+
 ## Where it stands
 
 The first curriculum task is live, with a benchmark. `T1` asks an agent to grow the core's
