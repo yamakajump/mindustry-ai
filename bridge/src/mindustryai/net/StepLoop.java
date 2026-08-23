@@ -37,6 +37,9 @@ public class StepLoop implements ApplicationListener {
     private int ticksRemaining;
     private boolean stepping;
 
+    /** The connection a step in progress belongs to. See {@link BridgeServer#session()}. */
+    private int steppingSession;
+
     public StepLoop(BridgeServer server, Clock clock) {
         this.server = server;
         this.clock = clock;
@@ -49,6 +52,15 @@ public class StepLoop implements ApplicationListener {
     @Override
     public void update() {
         if (stepping) {
+            // The agent that asked for this step is gone. Abandon it silently: delivering
+            // the reply would hand it to whoever connects next and shift every subsequent
+            // exchange by one message.
+            if (server.session() != steppingSession) {
+                stepping = false;
+                freeze();
+                return;
+            }
+
             // Only count ticks the world actually ran. Paused frames must not count, or a
             // step would end without the simulation having moved.
             if (!Vars.state.isPaused() && Vars.state.isPlaying()) {
@@ -146,6 +158,7 @@ public class StepLoop implements ApplicationListener {
         }
 
         ticksRemaining = repeat;
+        steppingSession = server.session();
         stepping = true;
         unfreeze();
     }

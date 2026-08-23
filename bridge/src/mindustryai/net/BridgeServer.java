@@ -37,6 +37,17 @@ public class BridgeServer {
     private volatile boolean running;
     private Thread acceptThread;
 
+    /**
+     * Incremented for every accepted connection.
+     *
+     * <p>Work started for one agent must never have its reply delivered to the next one.
+     * A step spans many ticks, so an agent can disconnect while its step is still running;
+     * without this counter the late reply would sit in the queue and be handed to whoever
+     * connects next, silently shifting every subsequent request and reply by one.
+     */
+    private final java.util.concurrent.atomic.AtomicInteger session =
+        new java.util.concurrent.atomic.AtomicInteger();
+
     public BridgeServer(int port) {
         this.port = port;
     }
@@ -58,7 +69,8 @@ public class BridgeServer {
             try (Socket socket = serverSocket.accept()) {
                 socket.setTcpNoDelay(true);
                 client = socket;
-                Log.info("[mindustry-ai] agent connected");
+                session.incrementAndGet();
+                Log.info("[mindustry-ai] agent connected, session @", session.get());
                 serve(socket);
             } catch (IOException e) {
                 if (running) {
@@ -119,6 +131,11 @@ public class BridgeServer {
 
     public boolean hasClient() {
         return client != null;
+    }
+
+    /** Identifier of the current connection. See the field comment on {@code session}. */
+    public int session() {
+        return session.get();
     }
 
     public int port() {

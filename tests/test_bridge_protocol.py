@@ -87,6 +87,34 @@ def test_malformed_json_does_not_kill_the_connection(bridge: Bridge) -> None:
     assert bridge.request({"cmd": "hello"})["ok"] is True
 
 
+def test_disconnecting_mid_step_does_not_poison_the_next_client(bridge_server) -> None:
+    """Regression test.
+
+    A step spans many ticks, so an agent can vanish while one is still running. If the
+    bridge delivers that late reply anyway, it is handed to whoever connects next: their
+    handshake returns an observation, every later request answers the previous one, and
+    the session dies on a timeout with nothing in the logs explaining why. Found on CI,
+    where the machine was slow enough to make the race reliable.
+    """
+    victim = Bridge(port=BRIDGE_PORT, timeout=30.0)
+    victim.connect()
+    victim.reset("Ancient_Caldera", "survival")
+
+    # Ask for a long step, then leave without reading the answer.
+    victim._send(json.dumps({"cmd": "step", "repeat": 600}).encode("utf-8"))
+    assert victim._sock is not None
+    victim._sock.close()
+    victim._sock = None
+
+    with Bridge(port=BRIDGE_PORT, timeout=30.0) as successor:
+        hello = successor.request({"cmd": "hello"})
+        assert "protocol" in hello, f"got a stale reply meant for the previous agent: {hello}"
+
+        # And the connection is genuinely usable, not merely one message ahead.
+        observed = successor.observe()
+        assert "tick" in observed
+
+
 def test_oversized_frame_is_refused(bridge_server) -> None:
     """Guards against a length prefix being trusted enough to allocate from.
 

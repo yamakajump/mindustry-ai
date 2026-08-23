@@ -1,4 +1,8 @@
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+# Integration tests drive real servers over sockets. Without a hard cap a single
+# stuck read hangs the whole run, which on CI means a job that burns its budget
+# instead of reporting which test is at fault.
+timeout = 180
 addopts = "-ra"
