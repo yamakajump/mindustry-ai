@@ -151,15 +151,17 @@ def test_a_built_chain_delivers_ore_to_the_core(building) -> None:
 
     # Mindustry rotations: 0 right, 1 up, 2 left, 3 down.
     directions = {(1, 0): 0, (0, 1): 1, (-1, 0): 2, (0, -1): 3}
+    conveyors = 0
     for index, (px, py) in enumerate(path):
         nx, ny = path[index + 1] if index + 1 < len(path) else (core_x, core_y)
         rotation = directions.get((np.sign(nx - px), np.sign(ny - py)))
         if rotation is None:
             continue
-        client.act({
+        outcome = client.act({
             "type": "place", "block": "conveyor",
             "x": px, "y": py, "rotation": int(rotation),
-        })
+        })["action"]
+        conveyors += bool(outcome["applied"])
 
     # Runs until delivery is observed rather than for a fixed budget. A drill's output
     # depends on how far the chain had to run, and a fixed number of steps made this pass
@@ -177,5 +179,8 @@ def test_a_built_chain_delivers_ore_to_the_core(building) -> None:
     # rather than a made-up observation. `produced` counts only what came down a transport
     # block, never what a unit carried in by hand, which is the distinction the whole
     # reward rests on.
-    assert result["placed"].get("production", 0) >= 1, "the drill was not counted as placed"
-    assert result["placed"].get("distribution", 0) >= 1, "no conveyor was counted as placed"
+    # Counted against what the engine actually accepted, not against what was asked for.
+    # A drill that lands next to the core needs no conveyor at all, and the run where this
+    # test insisted on one was a test measuring where the ore happened to be.
+    assert result["placed"].get("production", 0) == 1, "the drill was not counted as placed"
+    assert result["placed"].get("distribution", 0) == conveyors, "conveyors miscounted"

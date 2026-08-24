@@ -46,13 +46,54 @@ BRIDGE_PORT_BASE = 7920
 GAME_PORT_BASE = 6920
 
 
+def showcase_policy(net: PolicyNet, window: int, device: str):
+    """Play the current policy, for the one match a person is watching.
+
+    Sampled rather than greedy, and read straight off the live network: the showcase is
+    meant to show what the agent is doing right now, weights and all, not a frozen
+    snapshot of it and not an idealised version of it. Its experience is never stored, so
+    it cannot influence the run it is displaying.
+    """
+
+    def act(observation, info):
+        with torch.no_grad():
+            mask = info.get("action_mask", {})
+            action, _, _, _ = net.act(
+                torch.as_tensor(observation["spatial"][None], device=device),
+                torch.as_tensor(observation["global"][None], device=device),
+                {
+                    "type": torch.as_tensor(mask["type"][None], device=device),
+                    "block": torch.as_tensor(mask["block"][None], device=device),
+                    "position": torch.as_tensor(mask["position"].reshape(1, -1), device=device),
+                },
+            )
+            return net.to_env_action(action)[0]
+
+    return act
+
+
 class EnvWorker:
     """One environment on its own thread, driven by a request/response queue pair."""
 
-    def __init__(self, index: int, args, monitor: TrainingMonitor) -> None:
+    def __init__(self, index: int, args, monitor: TrainingMonitor,
+                 showcase: bool = False) -> None:
         self.index = index
         self.args = args
         self.monitor = monitor
+        #: True for the one match played at a speed a person can follow.
+        #:
+        #: It is deliberately **not** part of the training batch. Rollout collection is
+        #: lockstep: the trainer hands an action to every environment and waits for all of
+        #: them before the next step, so the slowest one sets the pace for the rest. A
+        #: match at 2x takes a quarter of a second per step and every other environment
+        #: spends that quarter second idle. Measured with sixteen environments: 46.3
+        #: steps/s in lockstep behind one watchable match, against a simulation that is
+        #: otherwise uncapped. The showcase runs itself instead, on the same policy,
+        #: and its experience is thrown away.
+        self.showcase = showcase
+        #: Set by the trainer once the network exists. Until then the showcase idles.
+        self.act = None
+        self.stop = threading.Event()
         #: Wall-clock spacing between animation frames. At training speed a step takes a
         #: couple of milliseconds, so fetching a frame per step would produce hundreds a
         #: second for a browser that can draw ten. The simulation is what should run flat
@@ -83,11 +124,11 @@ class EnvWorker:
 
         jar = str(ensure_jar())
 
-        # The watched environment runs at a speed a person can follow. Training speed is
-        # several hundred times realtime, which is unwatchable: a ten minute match goes by
-        # in a second. One slow environment costs a little throughput and is the only way
-        # to actually see what the agent is doing.
-        watched = self.index == self.args.watch
+        # The showcase runs at a speed a person can follow. Training speed is uncapped,
+        # which is unwatchable: a ten minute match goes by in a moment. It is a separate
+        # environment rather than one of the training ones precisely because a slow one in
+        # the batch would hold every other environment at its own pace.
+        watched = self.showcase
         env = MindustryEnv(
             task,
             server_dir=str(Path(self.args.root) / f"env{self.index}"),
@@ -174,7 +215,7 @@ class EnvWorker:
             state.objective = task.description
             state.max_steps = task.max_steps
             state.game_port = GAME_PORT_BASE + self.index
-            state.watchable = self.index == self.args.watch
+            state.watchable = self.showcase
 
             observation, info = env.reset()
             self._capture_terrain(env, state)
@@ -184,10 +225,18 @@ class EnvWorker:
             self.results.put((observation, info))
             self.ready.set()
 
-            while True:
-                action = self.requests.get()
-                if action is None:
-                    break
+            while not self.stop.is_set():
+                if self.showcase:
+                    if self.act is None:
+                        # The policy is built from the first observation, which this
+                        # worker has only just produced. A short wait beats a busy loop.
+                        time.sleep(0.2)
+                        continue
+                    action = self.act(observation, info)
+                else:
+                    action = self.requests.get()
+                    if action is None:
+                        break
 
                 observation, reward, terminated, truncated, info = env.step(action)
                 episode_reward += reward
@@ -199,6 +248,14 @@ class EnvWorker:
                 state.wave = int(raw.get("wave", 0))
                 state.reward = episode_reward
                 state.items = dict(raw.get("items", {}))
+                state.produced = sum(int(a) for a in raw.get("produced", {}).values())
+                # Read off the current observation rather than accumulated: every
+                # milestone counter is cumulative within an episode, so the latest one
+                # already holds everything reached so far.
+                state.reached = [
+                    stone.name for stone in tasks.MILESTONES
+                    if stone.read(raw) >= stone.threshold
+                ]
                 state.unit = dict(raw.get("unit", {}))
                 state.action = env.action_types[int(action[0])]
                 state.core = [int(raw.get("core_x", -1)), int(raw.get("core_y", -1))]
@@ -222,8 +279,11 @@ class EnvWorker:
                     episode_reward = 0.0
                     episode_steps = 0
                     state.built = []
+                    state.produced = 0
+                    state.reached = []
 
-                self.results.put((observation, info, reward, done))
+                if not self.showcase:
+                    self.results.put((observation, info, reward, done))
         except Exception as error:  # noqa: BLE001
             self.failed = error
             self.monitor.match(self.index).alive = False
@@ -349,8 +409,10 @@ def main() -> None:
                         help="train across at most N worlds instead of the whole pool; "
                              "the held-out set is unaffected either way")
     parser.add_argument("--port", type=int, default=8800)
-    parser.add_argument("--watch", type=int, default=0,
-                        help="index of the match to run at watchable speed, -1 for none")
+    parser.add_argument("--watch", action="store_true", default=True,
+                        help="play one extra match at a speed a person can follow")
+    parser.add_argument("--no-watch", dest="watch", action="store_false",
+                        help="train only; nothing to join in the game")
     parser.add_argument("--watch-speed", type=int, default=2,
                         help="simulation speed for the watched match, 1 is realtime")
     parser.add_argument("--record", action="store_true", default=True,
@@ -391,13 +453,19 @@ def main() -> None:
         # like nothing is happening.
         webbrowser.open(url)
 
+    # The showcase is an extra environment, not one of the training ones. `--envs 16`
+    # means sixteen environments feeding the learner, plus one more to look at.
+    showcase_index = args.envs if args.watch else -1
     workers = [EnvWorker(i, args, monitor) for i in range(args.envs)]
+    if args.watch:
+        workers.append(EnvWorker(showcase_index, args, monitor, showcase=True))
     for worker in workers:
         worker.start()
     for worker in workers:
         worker.ready.wait()
 
-    alive = [w for w in workers if w.failed is None]
+    showcase = next((w for w in workers if w.showcase and w.failed is None), None)
+    alive = [w for w in workers if w.failed is None and not w.showcase]
     if not alive:
         raise SystemExit("no environment started")
     print(f"{len(alive)} environments ready", flush=True)
@@ -405,11 +473,11 @@ def main() -> None:
     print("=" * 68, flush=True)
     print(f"  DASHBOARD   {url}", flush=True)
     print("              every match animated, versions, replays", flush=True)
-    if args.watch >= 0:
+    if showcase is not None:
         print(f"  IN THE GAME Mindustry -> Play -> Join Game -> "
-              f"127.0.0.1:{GAME_PORT_BASE + args.watch}", flush=True)
-        print(f"              match #{args.watch} at {args.watch_speed}x, so it is followable",
-              flush=True)
+              f"127.0.0.1:{GAME_PORT_BASE + showcase.index}", flush=True)
+        print(f"              match #{showcase.index} at {args.watch_speed}x, alongside the "
+              f"training run rather than inside it", flush=True)
     print("=" * 68, flush=True)
     print("", flush=True)
 
@@ -428,6 +496,9 @@ def main() -> None:
     )
     agent = PPO(net, config)
     print(f"policy on {config.device}, {sum(p.numel() for p in net.parameters()):,} parameters")
+
+    if showcase is not None:
+        showcase.act = showcase_policy(net, args.window, config.device)
 
     n_envs = len(alive)
     steps = config.steps_per_env
@@ -562,9 +633,11 @@ def main() -> None:
 
 
 
+    for worker in workers:
+        worker.stop.set()
     for worker in alive:
         worker.requests.put(None)
-    for worker in alive:
+    for worker in workers:
         worker.thread.join(timeout=30)
     monitor.stop()
     print(f"done, saved to {args.out / 'beta.pt'}")

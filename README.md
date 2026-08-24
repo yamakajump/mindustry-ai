@@ -164,9 +164,15 @@ Tasks, in the order they were built:
 | **`frontier`** | **a new generated world every episode** | **land, build an economy, hold it** |
 | `frontier_shaped` | the same worlds | the control: `frontier` graded the old way, so the reward change is measured rather than argued about |
 
+One extra match is played alongside the run at a speed a person can follow, so there is
+always something to join in the game. It is deliberately outside the training batch:
+rollout collection is lockstep, so a slow environment inside it holds every other one at
+its own pace, and one watchable match cost the whole run a factor of thirty in throughput
+before this was noticed.
+
 Useful flags: `--envs N`, `--worlds N` to narrow the training pool without touching the
-held-out half, `--direct` to drop the body and train faster, `--watch N` to pick which
-match runs at a speed a person can follow, `--no-record` to skip replays.
+held-out half, `--direct` to drop the body and train faster, `--no-watch` to drop the
+showcase match, `--no-record` to skip replays.
 
 ### Or join it in the real game
 

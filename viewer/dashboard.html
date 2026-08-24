@@ -120,6 +120,15 @@
   .items { display: flex; flex-wrap: wrap; gap: var(--s1); }
   .item { background: var(--raised); border: 1px solid var(--line); border-radius: 5px; padding: 1px 7px; font-size: 12px; }
   .item b { color: var(--ore); font-weight: 700; font-variant-numeric: tabular-nums; }
+  /* The milestone ladder. Reaching a rung is the thing worth seeing on a card: a match
+     that never lights `automation` has not started playing, whatever its reward says. */
+  .rungs { display: flex; flex-wrap: wrap; gap: 3px; margin-top: var(--s1); }
+  .rung {
+    background: rgba(121,221,154,.14); border: 1px solid rgba(121,221,154,.4);
+    color: var(--good); border-radius: 4px; padding: 0 5px; font-size: 10px;
+    letter-spacing: .02em; white-space: nowrap;
+  }
+  .rung.big { background: rgba(121,221,154,.34); font-weight: 700; }
 
   /* Side panels ------------------------------------------------------------- */
   aside { display: flex; flex-direction: column; gap: var(--s3); position: sticky; top: 76px; }
@@ -313,6 +322,17 @@ const STRINGS = {
     gen:"gen", mean:"mean", episodesShort:"eps", waves:"waves", copy:"copy", copied:"copied!",
     follow:"follow the bot", cameraHint:"drag to move, wheel to zoom, F to follow",
     needGenerations:"first episodes still running...",
+    automated:"delivered by machine",
+    // The ladder, in plain words. Each one lights up the first time a match reaches it.
+    rung_first_drill:"first drill", rung_first_conveyor:"first conveyor",
+    rung_first_wall:"first wall", rung_first_turret:"first turret",
+    rung_automation:"a machine delivered ore", rung_automation_100:"100 delivered",
+    rung_automation_1k:"1,000 delivered", rung_automation_10k:"10,000 delivered",
+    rung_two_ores:"two ores automated", rung_three_ores:"three ores automated",
+    rung_first_kill:"first kill", rung_held_a_wave:"25 killed",
+    rung_first_power:"first generator", rung_first_crafter:"first crafter",
+    rung_first_factory:"first unit factory",
+    rung_wave_5:"wave 5", rung_wave_10:"wave 10", rung_wave_20:"wave 20",
   },
   fr: {
     task:"tâche", matches:"parties", episodes:"épisodes", generations:"générations",
@@ -336,6 +356,16 @@ const STRINGS = {
     gen:"gén", mean:"moy", episodesShort:"éps", waves:"vagues", copy:"copier", copied:"copié !",
     follow:"suivre le bot", cameraHint:"glisser pour déplacer, molette pour zoomer, F pour suivre",
     needGenerations:"premiers épisodes en cours...",
+    automated:"livré par machine",
+    rung_first_drill:"première foreuse", rung_first_conveyor:"premier convoyeur",
+    rung_first_wall:"premier mur", rung_first_turret:"première tourelle",
+    rung_automation:"une machine a livré du minerai", rung_automation_100:"100 livrés",
+    rung_automation_1k:"1 000 livrés", rung_automation_10k:"10 000 livrés",
+    rung_two_ores:"deux minerais automatisés", rung_three_ores:"trois minerais automatisés",
+    rung_first_kill:"première élimination", rung_held_a_wave:"25 éliminés",
+    rung_first_power:"premier générateur", rung_first_crafter:"première usine",
+    rung_first_factory:"première fabrique d'unités",
+    rung_wave_5:"vague 5", rung_wave_10:"vague 10", rung_wave_20:"vague 20",
   },
 };
 let lang = localStorage.getItem("lang") || "en";
@@ -1943,8 +1973,10 @@ function buildCard(match) {
       <div class="row"><span>${t("wave")}</span><span class="f-wave"></span></div>
       <div class="row"><span>${t("reward")}</span><span class="f-reward"></span></div>
       <div class="row"><span>${t("built")}</span><span class="f-built"></span></div>
+      <div class="row"><span>${t("automated")}</span><span class="f-produced"></span></div>
     </div>
-    <div class="items"></div>`;
+    <div class="items"></div>
+    <div class="rungs"></div>`;
   card.onclick = () => openDetail(match.index);
   document.getElementById("matches").append(card);
   cards.set(match.index, card);
@@ -1986,6 +2018,10 @@ function updateCard(match) {
     };
   }
 
+  const produced = card.querySelector(".f-produced");
+  produced.textContent = match.produced || 0;
+  produced.style.color = match.produced ? "var(--good)" : "";
+
   const items = card.querySelector(".items");
   items.textContent = "";
   for (const [name, amount] of Object.entries(match.items || {})) {
@@ -1993,6 +2029,21 @@ function updateCard(match) {
     chip.className = "item";
     chip.innerHTML = `${name} <b>${amount}</b>`;
     items.append(chip);
+  }
+
+  // Rebuilt only when the set changes: the card refreshes twice a second and rungs move
+  // a handful of times per episode, so redrawing them every tick is pure churn.
+  const rungs = card.querySelector(".rungs");
+  const reached = (match.reached || []).join(",");
+  if (rungs.dataset.reached !== reached) {
+    rungs.dataset.reached = reached;
+    rungs.textContent = "";
+    for (const name of match.reached || []) {
+      const chip = document.createElement("span");
+      chip.className = "rung" + (name.startsWith("automation") ? " big" : "");
+      chip.textContent = t("rung_" + name) || name;
+      rungs.append(chip);
+    }
   }
 }
 

@@ -233,6 +233,15 @@ class MatchState:
     items: dict[str, int] = field(default_factory=dict)
     progress: float = 0.0
 
+    #: Ore a machine delivered to the core, as opposed to ore the agent carried in. The
+    #: single number that says whether this match has an economy or a busy pair of hands.
+    produced: int = 0
+
+    #: Rungs of the milestone ladder this episode has reached, by name. Worth far more on
+    #: screen than a reward: a match that never reaches `automation` has not started
+    #: playing, whatever it scores.
+    reached: list[str] = field(default_factory=list)
+
     unit: dict[str, Any] = field(default_factory=dict)
     action: str = ""
     refused: int = 0
@@ -278,6 +287,7 @@ class MatchState:
             "tick": round(self.tick), "wave": self.wave,
             "reward": round(self.reward, 3), "best_reward": round(self.best_reward, 3),
             "items": self.items, "progress": round(self.progress, 4),
+            "produced": self.produced, "reached": self.reached,
             "unit": self.unit, "action": self.action,
             "refused": self.refused, "applied": self.applied,
             "episode": self.episode, "solved": self.solved,

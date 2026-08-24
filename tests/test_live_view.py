@@ -201,3 +201,30 @@ def test_a_generation_can_be_told_which_file_it_produced() -> None:
     snapshot = monitor.snapshot()
     assert snapshot["generations"][0]["checkpoint"] == "beta-best.pt"
     assert snapshot["totals"]["best_generation"] == 1
+
+
+def test_a_match_carries_its_milestones_to_the_viewer() -> None:
+    """The rungs are the part of a match worth looking at. A card showing a reward of 3.2
+    says nothing; a card showing that a machine delivered ore says the agent started
+    playing."""
+    from gamma.monitor import MatchState
+
+    state = MatchState(index=0)
+    state.produced = 412
+    state.reached = ["first_drill", "automation"]
+
+    payload = state.as_dict()
+    assert payload["produced"] == 412
+    assert payload["reached"] == ["first_drill", "automation"]
+
+
+def test_the_dashboard_names_every_rung_in_both_languages() -> None:
+    """A rung with no translation renders its own slug on screen, which is how a viewer
+    ends up showing `rung_automation_1k` to a person."""
+    from gamma import tasks
+
+    page = (Path(__file__).resolve().parents[1] / "viewer" / "dashboard.html").read_text(
+        encoding="utf-8"
+    )
+    for stone in tasks.MILESTONES:
+        assert page.count(f"rung_{stone.name}:") == 2, stone.name
