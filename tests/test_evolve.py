@@ -182,3 +182,138 @@ def test_building_nothing_is_never_the_best_answer() -> None:
     working.delivered, working.cost = 3, 70
 
     assert fitness(working) > fitness(empty)
+
+# The genome written as parts ------------------------------------------------------------
+
+
+def test_a_straight_path_points_the_whole_way_along_itself() -> None:
+    """The reason this genome exists. Spelling a five-tile line cell by cell means rolling
+    the right rotation five times in a row; here it is one gene and never wrong."""
+    from gamma.evolve import Path
+
+    assert list(Path(2, 3, 6, 3, True).tiles()) == [
+        (2, 3, 0), (3, 3, 0), (4, 3, 0), (5, 3, 0), (6, 3, 0)
+    ]
+
+
+def test_a_path_turns_its_corner_correctly() -> None:
+    """One wrong tile at the elbow and the line delivers nothing at all, which is exactly
+    the failure the cell genome kept producing."""
+    from gamma.evolve import Path
+
+    tiles = list(Path(2, 2, 4, 5, True).tiles())
+    assert tiles[0] == (2, 2, 0)
+    assert tiles[2] == (4, 2, 1), "the corner still points along the old leg"
+    assert tiles[-1] == (4, 5, 1)
+
+
+def test_the_elbow_can_go_either_way() -> None:
+    from gamma.evolve import Path
+
+    across = [(x, y) for x, y, _ in Path(0, 0, 3, 3, True).tiles()]
+    down = [(x, y) for x, y, _ in Path(0, 0, 3, 3, False).tiles()]
+    assert across != down
+    assert across[-1] == down[-1] == (3, 3)
+
+
+def test_a_path_of_no_length_is_a_single_tile() -> None:
+    from gamma.evolve import Path
+
+    assert list(Path(4, 4, 4, 4, True).tiles()) == [(4, 4, 0)]
+
+
+def test_a_design_flattens_to_something_stampable() -> None:
+    from gamma.evolve import Design, Drill, Path
+
+    design = Design(6, 6, [Drill(1, 1)], [Path(2, 1, 5, 1, True)])
+    layout = design.to_layout()
+    cells = dict(((x, y), (block, rotation)) for x, y, block, rotation in layout.cells())
+
+    assert cells[(1, 1)][0] == "mechanical-drill"
+    assert cells[(2, 1)] == ("conveyor", 0)
+    assert cells[(5, 1)] == ("conveyor", 0)
+
+
+def test_a_path_breaks_around_a_drill_rather_than_swallowing_it() -> None:
+    """The engine would refuse the conveyor anyway, and what stood is what gets billed."""
+    from gamma.evolve import Design, Drill, Path
+
+    design = Design(6, 6, [Drill(3, 0)], [Path(0, 0, 5, 0, True)])
+    cells = dict(((x, y), block) for x, y, block, _ in design.to_layout().cells())
+    assert cells[(3, 0)] == "mechanical-drill"
+    assert cells[(2, 0)] == "conveyor"
+
+
+def test_a_design_never_writes_outside_its_rectangle() -> None:
+    from gamma.evolve import Design, Drill, Path
+
+    design = Design(5, 5, [Drill(9, 9)], [Path(-3, 2, 20, 2, True)])
+    layout = design.to_layout()
+    assert len(layout.blocks) == 25
+    for x, y, _, _ in layout.cells():
+        assert 0 <= x < 5 and 0 <= y < 5
+
+
+def test_designs_stay_a_workable_size_when_bred() -> None:
+    """Taking every part from both parents doubles the design each generation until a
+    candidate is a solid block of conveyors, which scores badly and evaluates slowest."""
+    from gamma.evolve import cross_designs, random_design
+
+    rng = random.Random(0)
+    parent = random_design(10, 10, rng)
+    for _ in range(15):
+        parent = cross_designs(parent, random_design(10, 10, rng), rng)
+    assert len(parent.drills) <= 12 and len(parent.paths) <= 12
+    assert parent.drills, "a design with no drill can never deliver anything"
+
+
+def test_mutation_nudges_a_part_instead_of_replacing_it() -> None:
+    """A drill one tile off its ore delivers nothing and is one step from delivering
+    everything. A mutation that could only replace it would have to find the patch again."""
+    from gamma.evolve import Design, Drill, mutate_design
+
+    design = Design(20, 20, [Drill(10, 10)], [])
+    moves = []
+    for seed in range(40):
+        changed = mutate_design(design, random.Random(seed), rate=1.0)
+        moves.append(max(abs(changed.drills[0].x - 10), abs(changed.drills[0].y - 10)))
+    assert 0 < min(m for m in moves if m) <= 2
+    assert max(moves) <= 2, "a nudge that can cross the map is a replacement"
+
+
+def test_a_design_population_breeds_and_keeps_its_size() -> None:
+    from gamma.evolve import DesignPopulation
+
+    population = DesignPopulation(9, 9, size=10, elite=2, rng=random.Random(0))
+    population.seed()
+    for index, member in enumerate(population.members):
+        member.delivered, member.cost = index, index
+
+    population.advance()
+    assert len(population.members) == 10
+    assert (population.members[0].delivered, population.members[0].cost) == (9, 9)
+
+
+def test_hoarding_ore_never_beats_delivering_it() -> None:
+    """Uncapped, this term was worth more than the objective: eighty generations settled
+    at a mean of 182 of which 89% was ore going nowhere, against 21 delivered. The search
+    had stopped building lines and started hoarding."""
+    hoard = solid(13, 13, "conveyor")
+    hoard.delivered, hoard.cost, hoard.stuck = 0, 169, 3237
+
+    line = Layout(13, 13, [0] * 169, [0] * 169)
+    line.delivered, line.cost, line.stuck = 21, 12, 40
+
+    assert fitness(line) > fitness(hoard)
+
+
+def test_a_design_going_nowhere_still_scores_above_an_empty_one() -> None:
+    """The cap has to leave the term able to do its job: pulling a design that is close
+    out of the flat zero that every incomplete line shares with a bare rectangle."""
+    close = solid(6, 6, "conveyor")
+    close.delivered, close.cost, close.stuck = 0, 20, 40
+
+    empty = Layout(6, 6, [0] * 36, [0] * 36)
+    empty.delivered, empty.cost, empty.stuck = 0, 0, 0
+
+    assert fitness(close) > fitness(empty)

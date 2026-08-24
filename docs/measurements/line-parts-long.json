@@ -1,0 +1,1094 @@
+{
+  "map": "Ancient_Caldera",
+  "genome": "parts",
+  "world_seed": 16,
+  "item": "copper",
+  "rectangle": [
+    13,
+    13
+  ],
+  "origin": [
+    120,
+    21
+  ],
+  "core": [
+    130,
+    32
+  ],
+  "ore_tiles": 46,
+  "ticks": 1800,
+  "seconds": 722.5,
+  "history": [
+    {
+      "generation": 1,
+      "best_delivered": 0,
+      "best_cost": 7,
+      "working": 0,
+      "mean_fitness": 9.98
+    },
+    {
+      "generation": 2,
+      "best_delivered": 0,
+      "best_cost": 10,
+      "working": 0,
+      "mean_fitness": 8.87
+    },
+    {
+      "generation": 3,
+      "best_delivered": 0,
+      "best_cost": 15,
+      "working": 0,
+      "mean_fitness": 8.95
+    },
+    {
+      "generation": 4,
+      "best_delivered": 0,
+      "best_cost": 7,
+      "working": 0,
+      "mean_fitness": 9.15
+    },
+    {
+      "generation": 5,
+      "best_delivered": 5,
+      "best_cost": 17,
+      "working": 1,
+      "mean_fitness": 9.38
+    },
+    {
+      "generation": 6,
+      "best_delivered": 5,
+      "best_cost": 18,
+      "working": 3,
+      "mean_fitness": 9.87
+    },
+    {
+      "generation": 7,
+      "best_delivered": 10,
+      "best_cost": 31,
+      "working": 7,
+      "mean_fitness": 11.53
+    },
+    {
+      "generation": 8,
+      "best_delivered": 18,
+      "best_cost": 15,
+      "working": 10,
+      "mean_fitness": 13.69
+    },
+    {
+      "generation": 9,
+      "best_delivered": 20,
+      "best_cost": 33,
+      "working": 12,
+      "mean_fitness": 16.46
+    },
+    {
+      "generation": 10,
+      "best_delivered": 24,
+      "best_cost": 31,
+      "working": 18,
+      "mean_fitness": 22.36
+    },
+    {
+      "generation": 11,
+      "best_delivered": 24,
+      "best_cost": 35,
+      "working": 23,
+      "mean_fitness": 30.28
+    },
+    {
+      "generation": 12,
+      "best_delivered": 20,
+      "best_cost": 34,
+      "working": 20,
+      "mean_fitness": 35.26
+    },
+    {
+      "generation": 13,
+      "best_delivered": 19,
+      "best_cost": 27,
+      "working": 18,
+      "mean_fitness": 40.0
+    },
+    {
+      "generation": 14,
+      "best_delivered": 19,
+      "best_cost": 45,
+      "working": 27,
+      "mean_fitness": 48.34
+    },
+    {
+      "generation": 15,
+      "best_delivered": 14,
+      "best_cost": 18,
+      "working": 35,
+      "mean_fitness": 58.86
+    },
+    {
+      "generation": 16,
+      "best_delivered": 14,
+      "best_cost": 54,
+      "working": 28,
+      "mean_fitness": 67.79
+    },
+    {
+      "generation": 17,
+      "best_delivered": 16,
+      "best_cost": 45,
+      "working": 27,
+      "mean_fitness": 75.17
+    },
+    {
+      "generation": 18,
+      "best_delivered": 23,
+      "best_cost": 50,
+      "working": 27,
+      "mean_fitness": 82.11
+    },
+    {
+      "generation": 19,
+      "best_delivered": 15,
+      "best_cost": 35,
+      "working": 28,
+      "mean_fitness": 91.5
+    },
+    {
+      "generation": 20,
+      "best_delivered": 19,
+      "best_cost": 41,
+      "working": 27,
+      "mean_fitness": 100.05
+    },
+    {
+      "generation": 21,
+      "best_delivered": 25,
+      "best_cost": 28,
+      "working": 27,
+      "mean_fitness": 108.13
+    },
+    {
+      "generation": 22,
+      "best_delivered": 20,
+      "best_cost": 32,
+      "working": 27,
+      "mean_fitness": 115.95
+    },
+    {
+      "generation": 23,
+      "best_delivered": 28,
+      "best_cost": 36,
+      "working": 23,
+      "mean_fitness": 121.1
+    },
+    {
+      "generation": 24,
+      "best_delivered": 18,
+      "best_cost": 45,
+      "working": 29,
+      "mean_fitness": 130.11
+    },
+    {
+      "generation": 25,
+      "best_delivered": 19,
+      "best_cost": 53,
+      "working": 29,
+      "mean_fitness": 136.91
+    },
+    {
+      "generation": 26,
+      "best_delivered": 31,
+      "best_cost": 61,
+      "working": 30,
+      "mean_fitness": 147.52
+    },
+    {
+      "generation": 27,
+      "best_delivered": 24,
+      "best_cost": 24,
+      "working": 32,
+      "mean_fitness": 157.7
+    },
+    {
+      "generation": 28,
+      "best_delivered": 23,
+      "best_cost": 62,
+      "working": 29,
+      "mean_fitness": 165.51
+    },
+    {
+      "generation": 29,
+      "best_delivered": 19,
+      "best_cost": 76,
+      "working": 32,
+      "mean_fitness": 177.77
+    },
+    {
+      "generation": 30,
+      "best_delivered": 29,
+      "best_cost": 46,
+      "working": 32,
+      "mean_fitness": 181.78
+    },
+    {
+      "generation": 31,
+      "best_delivered": 20,
+      "best_cost": 40,
+      "working": 31,
+      "mean_fitness": 181.26
+    },
+    {
+      "generation": 32,
+      "best_delivered": 29,
+      "best_cost": 19,
+      "working": 37,
+      "mean_fitness": 182.96
+    },
+    {
+      "generation": 33,
+      "best_delivered": 21,
+      "best_cost": 51,
+      "working": 37,
+      "mean_fitness": 184.4
+    },
+    {
+      "generation": 34,
+      "best_delivered": 28,
+      "best_cost": 57,
+      "working": 38,
+      "mean_fitness": 184.1
+    },
+    {
+      "generation": 35,
+      "best_delivered": 27,
+      "best_cost": 32,
+      "working": 38,
+      "mean_fitness": 183.56
+    },
+    {
+      "generation": 36,
+      "best_delivered": 19,
+      "best_cost": 61,
+      "working": 35,
+      "mean_fitness": 183.86
+    },
+    {
+      "generation": 37,
+      "best_delivered": 28,
+      "best_cost": 49,
+      "working": 34,
+      "mean_fitness": 182.28
+    },
+    {
+      "generation": 38,
+      "best_delivered": 23,
+      "best_cost": 28,
+      "working": 31,
+      "mean_fitness": 182.94
+    },
+    {
+      "generation": 39,
+      "best_delivered": 23,
+      "best_cost": 42,
+      "working": 29,
+      "mean_fitness": 182.9
+    },
+    {
+      "generation": 40,
+      "best_delivered": 28,
+      "best_cost": 78,
+      "working": 34,
+      "mean_fitness": 183.82
+    },
+    {
+      "generation": 41,
+      "best_delivered": 28,
+      "best_cost": 77,
+      "working": 31,
+      "mean_fitness": 182.49
+    },
+    {
+      "generation": 42,
+      "best_delivered": 23,
+      "best_cost": 51,
+      "working": 38,
+      "mean_fitness": 182.47
+    },
+    {
+      "generation": 43,
+      "best_delivered": 23,
+      "best_cost": 45,
+      "working": 37,
+      "mean_fitness": 183.74
+    },
+    {
+      "generation": 44,
+      "best_delivered": 16,
+      "best_cost": 46,
+      "working": 31,
+      "mean_fitness": 181.64
+    },
+    {
+      "generation": 45,
+      "best_delivered": 16,
+      "best_cost": 44,
+      "working": 31,
+      "mean_fitness": 180.44
+    },
+    {
+      "generation": 46,
+      "best_delivered": 26,
+      "best_cost": 53,
+      "working": 34,
+      "mean_fitness": 182.61
+    },
+    {
+      "generation": 47,
+      "best_delivered": 19,
+      "best_cost": 34,
+      "working": 37,
+      "mean_fitness": 182.88
+    },
+    {
+      "generation": 48,
+      "best_delivered": 16,
+      "best_cost": 51,
+      "working": 32,
+      "mean_fitness": 181.22
+    },
+    {
+      "generation": 49,
+      "best_delivered": 16,
+      "best_cost": 52,
+      "working": 25,
+      "mean_fitness": 179.44
+    },
+    {
+      "generation": 50,
+      "best_delivered": 24,
+      "best_cost": 68,
+      "working": 25,
+      "mean_fitness": 180.19
+    },
+    {
+      "generation": 51,
+      "best_delivered": 16,
+      "best_cost": 46,
+      "working": 28,
+      "mean_fitness": 180.89
+    },
+    {
+      "generation": 52,
+      "best_delivered": 13,
+      "best_cost": 39,
+      "working": 29,
+      "mean_fitness": 179.64
+    },
+    {
+      "generation": 53,
+      "best_delivered": 29,
+      "best_cost": 55,
+      "working": 32,
+      "mean_fitness": 181.9
+    },
+    {
+      "generation": 54,
+      "best_delivered": 24,
+      "best_cost": 37,
+      "working": 34,
+      "mean_fitness": 181.59
+    },
+    {
+      "generation": 55,
+      "best_delivered": 29,
+      "best_cost": 59,
+      "working": 26,
+      "mean_fitness": 180.75
+    },
+    {
+      "generation": 56,
+      "best_delivered": 18,
+      "best_cost": 69,
+      "working": 34,
+      "mean_fitness": 181.34
+    },
+    {
+      "generation": 57,
+      "best_delivered": 27,
+      "best_cost": 56,
+      "working": 38,
+      "mean_fitness": 183.3
+    },
+    {
+      "generation": 58,
+      "best_delivered": 20,
+      "best_cost": 56,
+      "working": 34,
+      "mean_fitness": 182.88
+    },
+    {
+      "generation": 59,
+      "best_delivered": 25,
+      "best_cost": 68,
+      "working": 30,
+      "mean_fitness": 181.97
+    },
+    {
+      "generation": 60,
+      "best_delivered": 18,
+      "best_cost": 46,
+      "working": 34,
+      "mean_fitness": 182.49
+    },
+    {
+      "generation": 61,
+      "best_delivered": 28,
+      "best_cost": 58,
+      "working": 33,
+      "mean_fitness": 181.75
+    },
+    {
+      "generation": 62,
+      "best_delivered": 34,
+      "best_cost": 74,
+      "working": 34,
+      "mean_fitness": 183.89
+    },
+    {
+      "generation": 63,
+      "best_delivered": 24,
+      "best_cost": 44,
+      "working": 35,
+      "mean_fitness": 183.91
+    },
+    {
+      "generation": 64,
+      "best_delivered": 19,
+      "best_cost": 67,
+      "working": 35,
+      "mean_fitness": 182.49
+    },
+    {
+      "generation": 65,
+      "best_delivered": 19,
+      "best_cost": 32,
+      "working": 31,
+      "mean_fitness": 181.46
+    },
+    {
+      "generation": 66,
+      "best_delivered": 28,
+      "best_cost": 44,
+      "working": 30,
+      "mean_fitness": 181.5
+    },
+    {
+      "generation": 67,
+      "best_delivered": 26,
+      "best_cost": 71,
+      "working": 32,
+      "mean_fitness": 181.42
+    },
+    {
+      "generation": 68,
+      "best_delivered": 14,
+      "best_cost": 78,
+      "working": 25,
+      "mean_fitness": 180.18
+    },
+    {
+      "generation": 69,
+      "best_delivered": 28,
+      "best_cost": 68,
+      "working": 32,
+      "mean_fitness": 181.8
+    },
+    {
+      "generation": 70,
+      "best_delivered": 23,
+      "best_cost": 72,
+      "working": 29,
+      "mean_fitness": 181.8
+    },
+    {
+      "generation": 71,
+      "best_delivered": 28,
+      "best_cost": 72,
+      "working": 23,
+      "mean_fitness": 180.63
+    },
+    {
+      "generation": 72,
+      "best_delivered": 24,
+      "best_cost": 70,
+      "working": 25,
+      "mean_fitness": 180.59
+    },
+    {
+      "generation": 73,
+      "best_delivered": 20,
+      "best_cost": 58,
+      "working": 25,
+      "mean_fitness": 180.55
+    },
+    {
+      "generation": 74,
+      "best_delivered": 18,
+      "best_cost": 66,
+      "working": 32,
+      "mean_fitness": 182.0
+    },
+    {
+      "generation": 75,
+      "best_delivered": 22,
+      "best_cost": 57,
+      "working": 29,
+      "mean_fitness": 180.85
+    },
+    {
+      "generation": 76,
+      "best_delivered": 24,
+      "best_cost": 60,
+      "working": 29,
+      "mean_fitness": 181.11
+    },
+    {
+      "generation": 77,
+      "best_delivered": 19,
+      "best_cost": 61,
+      "working": 33,
+      "mean_fitness": 181.0
+    },
+    {
+      "generation": 78,
+      "best_delivered": 20,
+      "best_cost": 75,
+      "working": 34,
+      "mean_fitness": 180.95
+    },
+    {
+      "generation": 79,
+      "best_delivered": 18,
+      "best_cost": 40,
+      "working": 31,
+      "mean_fitness": 181.0
+    },
+    {
+      "generation": 80,
+      "best_delivered": 21,
+      "best_cost": 62,
+      "working": 31,
+      "mean_fitness": 181.76
+    }
+  ],
+  "best": {
+    "delivered": 21,
+    "blocks": 84,
+    "layout": ">>>>>>>>>>>>>\n<<.......<<..\n<<...^^^^^^^.\n<<.......<<<>\n<<.......<<<.\n<<v......<<..\n.<v......<<..\n.<D......<<D.\n.<v..v.>><<^^\n.<v..v...<<..\n.<>>>vD>>D<D.\n.<...v.D.<...\n.<..Dv...<...",
+    "cells": [
+      [
+        1,
+        0,
+        "conveyor",
+        1
+      ],
+      [
+        4,
+        0,
+        "mechanical-drill",
+        0
+      ],
+      [
+        5,
+        0,
+        "conveyor",
+        3
+      ],
+      [
+        9,
+        0,
+        "conveyor",
+        1
+      ],
+      [
+        1,
+        1,
+        "conveyor",
+        1
+      ],
+      [
+        5,
+        1,
+        "conveyor",
+        3
+      ],
+      [
+        7,
+        1,
+        "mechanical-drill",
+        0
+      ],
+      [
+        9,
+        1,
+        "conveyor",
+        1
+      ],
+      [
+        1,
+        2,
+        "conveyor",
+        1
+      ],
+      [
+        2,
+        2,
+        "conveyor",
+        0
+      ],
+      [
+        3,
+        2,
+        "conveyor",
+        0
+      ],
+      [
+        4,
+        2,
+        "conveyor",
+        0
+      ],
+      [
+        5,
+        2,
+        "conveyor",
+        3
+      ],
+      [
+        6,
+        2,
+        "mechanical-drill",
+        0
+      ],
+      [
+        7,
+        2,
+        "conveyor",
+        0
+      ],
+      [
+        8,
+        2,
+        "conveyor",
+        0
+      ],
+      [
+        9,
+        2,
+        "mechanical-drill",
+        0
+      ],
+      [
+        10,
+        2,
+        "conveyor",
+        1
+      ],
+      [
+        11,
+        2,
+        "mechanical-drill",
+        0
+      ],
+      [
+        1,
+        3,
+        "conveyor",
+        1
+      ],
+      [
+        2,
+        3,
+        "conveyor",
+        3
+      ],
+      [
+        5,
+        3,
+        "conveyor",
+        3
+      ],
+      [
+        9,
+        3,
+        "conveyor",
+        1
+      ],
+      [
+        10,
+        3,
+        "conveyor",
+        1
+      ],
+      [
+        1,
+        4,
+        "conveyor",
+        1
+      ],
+      [
+        2,
+        4,
+        "conveyor",
+        3
+      ],
+      [
+        5,
+        4,
+        "conveyor",
+        3
+      ],
+      [
+        7,
+        4,
+        "conveyor",
+        0
+      ],
+      [
+        8,
+        4,
+        "conveyor",
+        0
+      ],
+      [
+        9,
+        4,
+        "conveyor",
+        1
+      ],
+      [
+        10,
+        4,
+        "conveyor",
+        1
+      ],
+      [
+        11,
+        4,
+        "conveyor",
+        2
+      ],
+      [
+        12,
+        4,
+        "conveyor",
+        2
+      ],
+      [
+        1,
+        5,
+        "conveyor",
+        1
+      ],
+      [
+        2,
+        5,
+        "mechanical-drill",
+        0
+      ],
+      [
+        9,
+        5,
+        "conveyor",
+        1
+      ],
+      [
+        10,
+        5,
+        "conveyor",
+        1
+      ],
+      [
+        11,
+        5,
+        "mechanical-drill",
+        0
+      ],
+      [
+        1,
+        6,
+        "conveyor",
+        1
+      ],
+      [
+        2,
+        6,
+        "conveyor",
+        3
+      ],
+      [
+        9,
+        6,
+        "conveyor",
+        1
+      ],
+      [
+        10,
+        6,
+        "conveyor",
+        1
+      ],
+      [
+        0,
+        7,
+        "conveyor",
+        1
+      ],
+      [
+        1,
+        7,
+        "conveyor",
+        1
+      ],
+      [
+        2,
+        7,
+        "conveyor",
+        3
+      ],
+      [
+        9,
+        7,
+        "conveyor",
+        1
+      ],
+      [
+        10,
+        7,
+        "conveyor",
+        1
+      ],
+      [
+        0,
+        8,
+        "conveyor",
+        1
+      ],
+      [
+        1,
+        8,
+        "conveyor",
+        1
+      ],
+      [
+        9,
+        8,
+        "conveyor",
+        1
+      ],
+      [
+        10,
+        8,
+        "conveyor",
+        1
+      ],
+      [
+        11,
+        8,
+        "conveyor",
+        1
+      ],
+      [
+        0,
+        9,
+        "conveyor",
+        1
+      ],
+      [
+        1,
+        9,
+        "conveyor",
+        1
+      ],
+      [
+        9,
+        9,
+        "conveyor",
+        1
+      ],
+      [
+        10,
+        9,
+        "conveyor",
+        1
+      ],
+      [
+        11,
+        9,
+        "conveyor",
+        1
+      ],
+      [
+        12,
+        9,
+        "conveyor",
+        0
+      ],
+      [
+        0,
+        10,
+        "conveyor",
+        1
+      ],
+      [
+        1,
+        10,
+        "conveyor",
+        1
+      ],
+      [
+        5,
+        10,
+        "conveyor",
+        2
+      ],
+      [
+        6,
+        10,
+        "conveyor",
+        2
+      ],
+      [
+        7,
+        10,
+        "conveyor",
+        2
+      ],
+      [
+        8,
+        10,
+        "conveyor",
+        2
+      ],
+      [
+        9,
+        10,
+        "conveyor",
+        2
+      ],
+      [
+        10,
+        10,
+        "conveyor",
+        2
+      ],
+      [
+        11,
+        10,
+        "conveyor",
+        2
+      ],
+      [
+        0,
+        11,
+        "conveyor",
+        1
+      ],
+      [
+        1,
+        11,
+        "conveyor",
+        1
+      ],
+      [
+        9,
+        11,
+        "conveyor",
+        1
+      ],
+      [
+        10,
+        11,
+        "conveyor",
+        1
+      ],
+      [
+        0,
+        12,
+        "conveyor",
+        0
+      ],
+      [
+        1,
+        12,
+        "conveyor",
+        0
+      ],
+      [
+        2,
+        12,
+        "conveyor",
+        0
+      ],
+      [
+        3,
+        12,
+        "conveyor",
+        0
+      ],
+      [
+        4,
+        12,
+        "conveyor",
+        0
+      ],
+      [
+        5,
+        12,
+        "conveyor",
+        0
+      ],
+      [
+        6,
+        12,
+        "conveyor",
+        0
+      ],
+      [
+        7,
+        12,
+        "conveyor",
+        0
+      ],
+      [
+        8,
+        12,
+        "conveyor",
+        0
+      ],
+      [
+        9,
+        12,
+        "conveyor",
+        0
+      ],
+      [
+        10,
+        12,
+        "conveyor",
+        0
+      ],
+      [
+        11,
+        12,
+        "conveyor",
+        0
+      ],
+      [
+        12,
+        12,
+        "conveyor",
+        0
+      ]
+    ]
+  }
+}

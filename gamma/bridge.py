@@ -250,6 +250,20 @@ class Bridge:
             message["seed"] = int(seed)
         return self.request(message)
 
+    def region(self, x: int, y: int, width: int, height: int) -> dict[str, Any]:
+        """What the buildings in a rectangle are holding, and how many there are.
+
+        A conveyor line that reaches the core delivers; a line stopping one tile short
+        delivers nothing, and from outside the two are identical. From inside they are
+        not: the second is full of ore going nowhere. This is what tells a search that a
+        design is close rather than that it is noise, and it is the engine's own count
+        rather than a guess about what closeness means.
+        """
+        return self.request({
+            "cmd": "region", "x": int(x), "y": int(y),
+            "width": int(width), "height": int(height),
+        })
+
     def sectors(self) -> dict[str, Any]:
         """Every procedural sector on Serpulo, with the threat the game assigned it."""
         return self.request({"cmd": "sectors"})

@@ -154,6 +154,7 @@ public class StepLoop implements ApplicationListener {
                 case "sectors" -> handleSectors();
                 case "observe" -> respond(observation(false));
                 case "scene" -> handleScene();
+                case "region" -> handleRegion(message);
                 case "close" -> handleClose();
                 default -> server.reply(error("unknown command: " + command.asString()));
             }
@@ -330,6 +331,58 @@ public class StepLoop implements ApplicationListener {
         if (replacement != null) {
             body = replacement;
         }
+    }
+
+    /**
+     * What the buildings in a rectangle are holding, and how many there are.
+     *
+     * <p>Exists to give a search something to climb. A conveyor line that reaches the core
+     * delivers; a line that stops one tile short delivers nothing at all, and the two look
+     * identical from outside. They do not look identical from inside: the second one is
+     * full of ore going nowhere. So the ore sitting in the blocks is the difference
+     * between "this design is close" and "this design is noise", and it is the engine's
+     * own number rather than a guess about what closeness means.
+     */
+    private void handleRegion(Jval message) {
+        int x = message.get("x") == null ? 0 : message.get("x").asInt();
+        int y = message.get("y") == null ? 0 : message.get("y").asInt();
+        int w = message.get("width") == null ? 1 : message.get("width").asInt();
+        int h = message.get("height") == null ? 1 : message.get("height").asInt();
+
+        Jval held = Jval.newObject();
+        int buildings = 0;
+        var counted = new arc.struct.IntSet();
+
+        for (int tx = x; tx < x + w; tx++) {
+            for (int ty = y; ty < y + h; ty++) {
+                var tile = Vars.world.tile(tx, ty);
+                if (tile == null || tile.build == null) {
+                    continue;
+                }
+                // A multi-tile building answers on every tile it covers, so it would be
+                // counted once per square without this.
+                if (!counted.add(tile.build.id)) {
+                    continue;
+                }
+                buildings++;
+                if (tile.build.items == null) {
+                    continue;
+                }
+                for (var item : Vars.content.items()) {
+                    int amount = tile.build.items.get(item);
+                    if (amount > 0) {
+                        held.put(item.name, (held.has(item.name)
+                            ? held.get(item.name).asInt() : 0) + amount);
+                    }
+                }
+            }
+        }
+
+        Jval reply = Jval.newObject();
+        reply.put("ok", true);
+        reply.put("buildings", buildings);
+        reply.put("held", held);
+        server.reply(reply.toString());
     }
 
     private void handleScene() {

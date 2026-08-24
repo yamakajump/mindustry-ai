@@ -56,6 +56,9 @@ class Layout:
     delivered: int | None = None
     #: Blocks it costs to build, which breaks ties towards the smaller design.
     cost: int = 0
+    #: Ore sitting inside the design, going nowhere. The difference between close and
+    #: hopeless, and the only thing an incomplete line has to offer.
+    stuck: int = 0
 
     def __post_init__(self) -> None:
         expected = self.width * self.height
@@ -135,7 +138,18 @@ def mutate(layout: Layout, rng: random.Random, rate: float = 0.04) -> Layout:
     return changed
 
 
-def fitness(layout: Layout, block_cost: float = 0.01) -> float:
+#: How much stuck ore the partial credit will look at, and no more.
+#:
+#: The cap is the whole safety of the term. Uncapped, a sprawling design full of conveyors
+#: holds thousands of items and scores on all of them: measured over eighty generations,
+#: the population settled at a mean fitness of 182 of which **89% was ore going nowhere**,
+#: against about 21 actually delivered. The search had stopped building lines and started
+#: hoarding. Sixty is roughly what a fifteen-tile line holds, so a design can still climb
+#: out of zero on it and can never live on it.
+STUCK_CAP = 60
+
+
+def fitness(layout: Layout, block_cost: float = 0.01, stuck_worth: float = 0.05) -> float:
     """What a layout is worth: what it delivered, less what it took to build.
 
     Charged on what the engine accepted rather than on what the genome asked for. A
@@ -146,10 +160,24 @@ def fitness(layout: Layout, block_cost: float = 0.01) -> float:
     seventy-block design 3.5 against the 3 ore it delivered, so the search was being paid
     to build nothing at all and the fittest layout in the population was the empty one.
     The cost is a tie-break between designs that work, never a reason not to work.
+
+    Ore stuck inside the design counts for a twentieth of ore delivered, up to a cap. The
+    term is what makes the search climbable at all: a line one tile short of the core
+    delivers nothing, exactly like an empty rectangle, so without it every candidate scores
+    the same and the only pressure left is to build less. Measured before it existed:
+    twenty-five generations, both genomes, nothing delivered, and the population shrank to
+    four blocks and stopped.
+
+    The cap is not a detail. Without it the same term was worth more than the objective:
+    over eighty generations the population settled at a mean of 182 of which 89% was ore
+    going nowhere, against 21 delivered, and the search had quietly stopped building lines
+    in favour of hoarding. A hint that pays better than the goal is not a hint.
     """
     if layout.delivered is None:
         return float("-inf")
-    return layout.delivered - block_cost * (layout.cost or layout.used())
+    return (layout.delivered
+            + stuck_worth * min(getattr(layout, "stuck", 0), STUCK_CAP)
+            - block_cost * (layout.cost or layout.used()))
 
 
 @dataclass
@@ -206,3 +234,220 @@ class Population:
     def best(self) -> Layout | None:
         measured = [layout for layout in self.members if layout.delivered is not None]
         return max(measured, key=fitness) if measured else None
+
+# A second way of writing a layout ------------------------------------------------------
+
+#: Direction of travel to Mindustry rotation: 0 right, 1 up, 2 left, 3 down.
+_ROTATION = {(1, 0): 0, (0, 1): 1, (-1, 0): 2, (0, -1): 3}
+
+
+@dataclass(frozen=True)
+class Drill:
+    """A drill, somewhere in the rectangle."""
+
+    x: int
+    y: int
+
+
+@dataclass(frozen=True)
+class Path:
+    """A run of conveyors from one point to another, elbowed once.
+
+    Rotations are derived from the direction of travel rather than drawn, which is the
+    whole point: a path is correct by construction. The cell-by-cell genome had to roll
+    four rotations right in a row to make three tiles of line, and a ten-tile line one
+    time in a million. Here a line of any length costs one gene and is never wrong.
+
+    This is geometry, not design. Which drills, which endpoints, how many, and whether any
+    of it is worth building are left entirely to the search.
+    """
+
+    x0: int
+    y0: int
+    x1: int
+    y1: int
+    #: True to travel along x first, then y. The elbow is the only choice a straight
+    #: corridor between two points still has, so it is worth a bit of the genome.
+    horizontal_first: bool
+
+    def tiles(self):
+        """The line, as (x, y, rotation) in order of travel."""
+        corner = (self.x1, self.y0) if self.horizontal_first else (self.x0, self.y1)
+
+        points = [(self.x0, self.y0)]
+        for tx, ty in (corner, (self.x1, self.y1)):
+            x, y = points[-1]
+            while x != tx:
+                x += 1 if tx > x else -1
+                points.append((x, y))
+            while y != ty:
+                y += 1 if ty > y else -1
+                points.append((x, y))
+
+        for index, (x, y) in enumerate(points):
+            if index + 1 < len(points):
+                nx, ny = points[index + 1]
+                rotation = _ROTATION.get((nx - x, ny - y), 0)
+            elif index:
+                # The last tile keeps the heading that brought it here, so a line ending
+                # against the core still hands its items over instead of stopping short.
+                px, py = points[index - 1]
+                rotation = _ROTATION.get((x - px, y - py), 0)
+            else:
+                rotation = 0
+            yield x, y, rotation
+
+
+@dataclass
+class Design:
+    """A layout written as parts rather than as cells.
+
+    The cell genome asks the search to spell every line one square at a time and gets what
+    that deserves: a rectangle of noise with a few accidental connections in it, stuck at
+    the first score it finds. This one asks for drills and lines, so every candidate is at
+    least the *kind* of thing that can work, and the search spends its budget on which and
+    where instead of on rediscovering that conveyors point somewhere.
+    """
+
+    width: int
+    height: int
+    drills: list = field(default_factory=list)
+    paths: list = field(default_factory=list)
+
+    delivered: int | None = None
+    cost: int = 0
+    stuck: int = 0
+
+    def copy(self):
+        return Design(self.width, self.height, list(self.drills), list(self.paths))
+
+    def to_layout(self) -> Layout:
+        """Flatten to a grid, so it can be stamped and scored like any other candidate.
+
+        Drills go down first and paths after, because a path crossing a drill should break
+        around it rather than swallow it: the engine would refuse the conveyor anyway, and
+        what stood is what gets billed.
+        """
+        size = self.width * self.height
+        blocks = [0] * size
+        rotations = [0] * size
+
+        drill = PALETTE.index("mechanical-drill")
+        for part in self.drills:
+            if 0 <= part.x < self.width and 0 <= part.y < self.height:
+                blocks[part.y * self.width + part.x] = drill
+
+        conveyor = PALETTE.index("conveyor")
+        for path in self.paths:
+            for x, y, rotation in path.tiles():
+                if not (0 <= x < self.width and 0 <= y < self.height):
+                    continue
+                index = y * self.width + x
+                if blocks[index] == drill:
+                    continue
+                blocks[index] = conveyor
+                rotations[index] = rotation
+
+        return Layout(self.width, self.height, blocks, rotations)
+
+    def used(self) -> int:
+        return self.to_layout().used()
+
+    def cells(self):
+        return self.to_layout().cells()
+
+
+def random_design(width: int, height: int, rng: random.Random,
+                  drills: int = 3, paths: int = 3) -> Design:
+    """A handful of drills and a handful of lines, all placed at random.
+
+    Small on purpose. A design starting with thirty parts has no room to grow into
+    anything and every mutation is lost in the crowd; one starting with a few can be added
+    to when adding pays.
+    """
+    def point():
+        return rng.randrange(width), rng.randrange(height)
+
+    return Design(
+        width, height,
+        [Drill(*point()) for _ in range(rng.randint(1, drills))],
+        [Path(*point(), *point(), rng.random() < 0.5) for _ in range(rng.randint(1, paths))],
+    )
+
+
+def cross_designs(first: Design, second: Design, rng: random.Random) -> Design:
+    """A child taking each parent's parts with even odds, then trimmed.
+
+    Taking every part from both would double the design each generation until a candidate
+    is a solid block of conveyors, which scores badly and takes longest to evaluate.
+    """
+    drills = [d for d in first.drills + second.drills if rng.random() < 0.5]
+    paths = [p for p in first.paths + second.paths if rng.random() < 0.5]
+    return Design(first.width, first.height,
+                  drills[:12] or [Drill(0, 0)], paths[:12])
+
+
+def mutate_design(design: Design, rng: random.Random, rate: float = 0.35) -> Design:
+    """Nudge a part, add one, or drop one.
+
+    Nudging matters more than it looks. A drill one tile off its ore delivers nothing and
+    is one step from delivering everything, and a mutation that could only replace it
+    outright would have to find the patch again from scratch.
+    """
+    changed = design.copy()
+
+    def point():
+        return rng.randrange(changed.width), rng.randrange(changed.height)
+
+    def nudge(value: int, limit: int) -> int:
+        return min(max(value + rng.randint(-2, 2), 0), limit - 1)
+
+    for index, drill in enumerate(changed.drills):
+        if rng.random() < rate:
+            changed.drills[index] = Drill(nudge(drill.x, changed.width),
+                                          nudge(drill.y, changed.height))
+    for index, path in enumerate(changed.paths):
+        if rng.random() < rate:
+            changed.paths[index] = Path(
+                nudge(path.x0, changed.width), nudge(path.y0, changed.height),
+                nudge(path.x1, changed.width), nudge(path.y1, changed.height),
+                path.horizontal_first if rng.random() > 0.25 else not path.horizontal_first,
+            )
+
+    if rng.random() < 0.3 and len(changed.drills) < 12:
+        changed.drills.append(Drill(*point()))
+    if rng.random() < 0.3 and len(changed.paths) < 12:
+        changed.paths.append(Path(*point(), *point(), rng.random() < 0.5))
+    if rng.random() < 0.2 and len(changed.drills) > 1:
+        changed.drills.pop(rng.randrange(len(changed.drills)))
+    if rng.random() < 0.2 and len(changed.paths) > 1:
+        changed.paths.pop(rng.randrange(len(changed.paths)))
+
+    return changed
+
+
+@dataclass
+class DesignPopulation(Population):
+    """The same tournament and elitism, over designs instead of grids."""
+
+    def seed(self):
+        self.members = [random_design(self.width, self.height, self.rng)
+                        for _ in range(self.size)]
+        return self.members
+
+    def advance(self):
+        ranked = sorted(self.members, key=fitness, reverse=True)
+        survivors = []
+        for original in ranked[:self.elite]:
+            kept = original.copy()
+            kept.delivered, kept.cost = original.delivered, original.cost
+            survivors.append(kept)
+
+        children = []
+        while len(children) + len(survivors) < self.size:
+            child = cross_designs(self._pick(ranked), self._pick(ranked), self.rng)
+            children.append(mutate_design(child, self.rng))
+
+        self.members = survivors + children
+        self.generation += 1
+        return self.members

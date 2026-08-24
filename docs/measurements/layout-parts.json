@@ -1,0 +1,252 @@
+{
+  "map": "Ancient_Caldera",
+  "genome": "parts",
+  "world_seed": 16,
+  "rectangle": [
+    13,
+    13
+  ],
+  "origin": [
+    120,
+    21
+  ],
+  "core": [
+    130,
+    32
+  ],
+  "ore_tiles": 46,
+  "ticks": 1800,
+  "seconds": 158.0,
+  "history": [
+    {
+      "generation": 1,
+      "best_delivered": 11,
+      "best_cost": 19,
+      "working": 3,
+      "mean_fitness": 0.59
+    },
+    {
+      "generation": 2,
+      "best_delivered": 11,
+      "best_cost": 9,
+      "working": 11,
+      "mean_fitness": 2.45
+    },
+    {
+      "generation": 3,
+      "best_delivered": 19,
+      "best_cost": 20,
+      "working": 18,
+      "mean_fitness": 4.66
+    },
+    {
+      "generation": 4,
+      "best_delivered": 22,
+      "best_cost": 25,
+      "working": 23,
+      "mean_fitness": 6.28
+    },
+    {
+      "generation": 5,
+      "best_delivered": 22,
+      "best_cost": 25,
+      "working": 21,
+      "mean_fitness": 6.56
+    },
+    {
+      "generation": 6,
+      "best_delivered": 22,
+      "best_cost": 3,
+      "working": 27,
+      "mean_fitness": 9.14
+    },
+    {
+      "generation": 7,
+      "best_delivered": 30,
+      "best_cost": 9,
+      "working": 33,
+      "mean_fitness": 11.92
+    },
+    {
+      "generation": 8,
+      "best_delivered": 30,
+      "best_cost": 9,
+      "working": 33,
+      "mean_fitness": 11.78
+    },
+    {
+      "generation": 9,
+      "best_delivered": 30,
+      "best_cost": 9,
+      "working": 30,
+      "mean_fitness": 12.24
+    },
+    {
+      "generation": 10,
+      "best_delivered": 41,
+      "best_cost": 11,
+      "working": 35,
+      "mean_fitness": 15.35
+    },
+    {
+      "generation": 11,
+      "best_delivered": 41,
+      "best_cost": 11,
+      "working": 36,
+      "mean_fitness": 16.06
+    },
+    {
+      "generation": 12,
+      "best_delivered": 41,
+      "best_cost": 8,
+      "working": 37,
+      "mean_fitness": 18.55
+    },
+    {
+      "generation": 13,
+      "best_delivered": 41,
+      "best_cost": 8,
+      "working": 36,
+      "mean_fitness": 18.38
+    },
+    {
+      "generation": 14,
+      "best_delivered": 41,
+      "best_cost": 8,
+      "working": 38,
+      "mean_fitness": 19.9
+    },
+    {
+      "generation": 15,
+      "best_delivered": 41,
+      "best_cost": 8,
+      "working": 34,
+      "mean_fitness": 18.11
+    },
+    {
+      "generation": 16,
+      "best_delivered": 41,
+      "best_cost": 8,
+      "working": 37,
+      "mean_fitness": 20.7
+    },
+    {
+      "generation": 17,
+      "best_delivered": 41,
+      "best_cost": 8,
+      "working": 38,
+      "mean_fitness": 21.19
+    },
+    {
+      "generation": 18,
+      "best_delivered": 41,
+      "best_cost": 8,
+      "working": 39,
+      "mean_fitness": 21.06
+    },
+    {
+      "generation": 19,
+      "best_delivered": 41,
+      "best_cost": 8,
+      "working": 37,
+      "mean_fitness": 23.91
+    },
+    {
+      "generation": 20,
+      "best_delivered": 41,
+      "best_cost": 7,
+      "working": 37,
+      "mean_fitness": 24.67
+    },
+    {
+      "generation": 21,
+      "best_delivered": 41,
+      "best_cost": 7,
+      "working": 40,
+      "mean_fitness": 23.15
+    },
+    {
+      "generation": 22,
+      "best_delivered": 41,
+      "best_cost": 5,
+      "working": 39,
+      "mean_fitness": 22.94
+    },
+    {
+      "generation": 23,
+      "best_delivered": 41,
+      "best_cost": 5,
+      "working": 38,
+      "mean_fitness": 22.73
+    },
+    {
+      "generation": 24,
+      "best_delivered": 41,
+      "best_cost": 5,
+      "working": 37,
+      "mean_fitness": 22.04
+    },
+    {
+      "generation": 25,
+      "best_delivered": 41,
+      "best_cost": 5,
+      "working": 38,
+      "mean_fitness": 24.99
+    }
+  ],
+  "best": {
+    "delivered": 41,
+    "blocks": 8,
+    "layout": ".......D.....\n.............\n.......DDD...\n.............\n........D..D.\n..........D..\n..........D..\n.............\n.............\n.............\n.............\n.............\n.............",
+    "cells": [
+      [
+        10,
+        6,
+        "mechanical-drill",
+        0
+      ],
+      [
+        10,
+        7,
+        "mechanical-drill",
+        0
+      ],
+      [
+        8,
+        8,
+        "mechanical-drill",
+        0
+      ],
+      [
+        11,
+        8,
+        "mechanical-drill",
+        0
+      ],
+      [
+        7,
+        10,
+        "mechanical-drill",
+        0
+      ],
+      [
+        8,
+        10,
+        "mechanical-drill",
+        0
+      ],
+      [
+        9,
+        10,
+        "mechanical-drill",
+        0
+      ],
+      [
+        7,
+        12,
+        "mechanical-drill",
+        0
+      ]
+    ]
+  }
+}
