@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mindustry-ai training</title>
+<style>
+  :root {
+    --bg: #0e0e14; --panel: #16161f; --line: #262633;
+    --text: #eae8e4; --muted: #8a8797; --accent: #ffd37f;
+    --good: #7ddc9a; --bad: #e8737d; --ore: #d99d73;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 13px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  header {
+    padding: 12px 18px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 22px; flex-wrap: wrap;
+    position: sticky; top: 0; background: var(--bg); z-index: 5;
+  }
+  h1 { font-size: 15px; margin: 0; color: var(--accent); font-weight: 600; letter-spacing: .02em; }
+  .stat { display: flex; flex-direction: column; }
+  .stat b { font-size: 17px; font-weight: 600; }
+  .stat span { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .07em; }
+  .live { margin-left: auto; color: var(--muted); display: flex; align-items: center; gap: 7px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); animation: pulse 1.6s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
+
+  main { padding: 18px; display: grid; grid-template-columns: 1fr 320px; gap: 18px; align-items: start; }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr } }
+
+  #matches { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 14px; }
+  .match {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px; display: flex; flex-direction: column; gap: 8px;
+  }
+  .match.dead { opacity: .45; }
+  .match header {
+    padding: 0; border: 0; position: static; background: none;
+    display: flex; align-items: baseline; gap: 8px;
+  }
+  .policy { color: var(--accent); font-weight: 600; }
+  .badge {
+    font-size: 10px; padding: 1px 7px; border-radius: 10px;
+    background: var(--line); color: var(--muted); text-transform: uppercase; letter-spacing: .06em;
+  }
+  canvas { width: 100%; height: 150px; background: #08080d; border-radius: 5px; display: block; }
+  .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--accent); transition: width .25s; }
+  .rows { display: grid; grid-template-columns: 1fr 1fr; gap: 1px 12px; }
+  .row { display: flex; justify-content: space-between; }
+  .row span:first-child { color: var(--muted); }
+  .items { display: flex; flex-wrap: wrap; gap: 5px; }
+  .item { background: var(--line); border-radius: 4px; padding: 1px 7px; }
+  .item b { color: var(--ore); font-weight: 600; }
+
+  aside { display: flex; flex-direction: column; gap: 14px; position: sticky; top: 74px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  .card h2 {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .09em;
+    color: var(--muted); margin: 0 0 9px; font-weight: 600;
+  }
+  ol { margin: 0; padding-left: 20px; }
+  ol li { padding: 2px 0; }
+  ol li b { color: var(--accent); }
+  .objective { color: var(--text); line-height: 1.5; }
+  .empty { color: var(--muted); padding: 26px; text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>mindustry-ai</h1>
+  <div class="stat"><b id="s-task">-</b><span>task</span></div>
+  <div class="stat"><b id="s-matches">0</b><span>matches</span></div>
+  <div class="stat"><b id="s-episodes">0</b><span>episodes</span></div>
+  <div class="stat"><b id="s-solved">0</b><span>solved</span></div>
+  <div class="stat"><b id="s-rate">0%</b><span>solve rate</span></div>
+  <div class="stat"><b id="s-sps">0</b><span>steps/s</span></div>
+  <div class="stat"><b id="s-elapsed">0s</b><span>elapsed</span></div>
+  <div class="live"><span class="dot"></span><span id="s-live">connecting</span></div>
+</header>
+
+<main>
+  <div id="matches"><div class="empty">waiting for matches...</div></div>
+
+  <aside>
+    <div class="card">
+      <h2>Objective</h2>
+      <div class="objective" id="s-objective">-</div>
+    </div>
+    <div class="card">
+      <h2>Leaderboard</h2>
+      <ol id="s-leaderboard"><li class="empty">no results yet</li></ol>
+    </div>
+    <div class="card">
+      <h2>Recent episodes</h2>
+      <canvas id="trend" height="120"></canvas>
+    </div>
+  </aside>
+</main>
+
+<script>
+const cards = new Map();
+
+function el(tag, cls, text) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function buildCard(match) {
+  const card = el("div", "match");
+  card.innerHTML = `
+    <header>
+      <span class="policy"></span>
+      <span class="badge match-id"></span>
+      <span class="badge action" style="margin-left:auto"></span>
+    </header>
+    <canvas></canvas>
+    <div class="bar"><i></i></div>
+    <div class="rows">
+      <div class="row"><span>step</span><span class="f-step"></span></div>
+      <div class="row"><span>wave</span><span class="f-wave"></span></div>
+      <div class="row"><span>reward</span><span class="f-reward"></span></div>
+      <div class="row"><span>best</span><span class="f-best"></span></div>
+      <div class="row"><span>built</span><span class="f-built"></span></div>
+      <div class="row"><span>refused</span><span class="f-refused"></span></div>
+    </div>
+    <div class="items"></div>`;
+  document.getElementById("matches").append(card);
+  cards.set(match.index, card);
+  return card;
+}
+
+/** Tiny map: terrain is not shipped here, so it shows the core and what was built. */
+function drawMatch(canvas, match) {
+  const ctx = canvas.getContext("2d");
+  const ratio = window.devicePixelRatio || 1;
+  const width = canvas.clientWidth * ratio, height = canvas.clientHeight * ratio;
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width; canvas.height = height;
+  }
+
+  ctx.fillStyle = "#08080d";
+  ctx.fillRect(0, 0, width, height);
+
+  const [mapW, mapH] = match.size;
+  if (!mapW || !mapH) return;
+  const scale = Math.min(width / mapW, height / mapH);
+  const offsetX = (width - mapW * scale) / 2;
+  const offsetY = (height - mapH * scale) / 2;
+  const put = (x, y) => [offsetX + x * scale, offsetY + (mapH - 1 - y) * scale];
+
+  const [coreX, coreY] = match.core;
+  if (coreX >= 0) {
+    const [cx, cy] = put(coreX, coreY);
+    ctx.fillStyle = "rgba(255,211,127,.22)";
+    ctx.beginPath();
+    ctx.arc(cx, cy, Math.max(9, scale * 14), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#ffd37f";
+    ctx.fillRect(cx - scale * 1.5, cy - scale * 1.5, scale * 3, scale * 3);
+  }
+
+  ctx.fillStyle = "#7ddc9a";
+  for (const [x, y] of match.built) {
+    const [px, py] = put(x, y);
+    ctx.fillRect(px, py, Math.max(1.5, scale), Math.max(1.5, scale));
+  }
+
+  const unit = match.unit || {};
+  if (unit.x !== undefined) {
+    const [ux, uy] = put(unit.x, unit.y);
+    ctx.strokeStyle = "#8fd0ff";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(ux, uy, 4.5, 0, Math.PI * 2);
+    ctx.stroke();
+    if (unit.mining) {
+      ctx.fillStyle = "#8fd0ff";
+      ctx.fill();
+    }
+  }
+}
+
+function updateCard(match) {
+  const card = cards.get(match.index) || buildCard(match);
+  card.classList.toggle("dead", !match.alive);
+
+  card.querySelector(".policy").textContent = match.policy;
+  card.querySelector(".match-id").textContent = "#" + match.index;
+  card.querySelector(".action").textContent = match.action || "-";
+  card.querySelector(".bar i").style.width = (match.progress * 100).toFixed(1) + "%";
+
+  card.querySelector(".f-step").textContent = `${match.step}/${match.max_steps}`;
+  card.querySelector(".f-wave").textContent = match.wave;
+  const reward = card.querySelector(".f-reward");
+  reward.textContent = match.reward.toFixed(2);
+  reward.style.color = match.reward > 0 ? "var(--good)" : match.reward < 0 ? "var(--bad)" : "";
+  card.querySelector(".f-best").textContent = match.best_reward.toFixed(2);
+  card.querySelector(".f-built").textContent = match.built.length;
+  card.querySelector(".f-refused").textContent = match.refused;
+
+  const items = card.querySelector(".items");
+  items.innerHTML = "";
+  for (const [name, amount] of Object.entries(match.items || {})) {
+    const chip = el("span", "item");
+    chip.innerHTML = `${name} <b>${amount}</b>`;
+    items.append(chip);
+  }
+  if (match.unit && match.unit.carrying) {
+    const chip = el("span", "item");
+    chip.innerHTML = `carrying <b>${match.unit.carrying}</b>`;
+    items.append(chip);
+  }
+
+  drawMatch(card.querySelector("canvas"), match);
+}
+
+function drawTrend(history) {
+  const canvas = document.getElementById("trend");
+  const ctx = canvas.getContext("2d");
+  const ratio = window.devicePixelRatio || 1;
+  canvas.width = canvas.clientWidth * ratio;
+  canvas.height = 120 * ratio;
+
+  ctx.fillStyle = "#08080d";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (history.length < 2) return;
+
+  const rewards = history.map(h => h.reward);
+  const min = Math.min(...rewards), max = Math.max(...rewards);
+  const span = (max - min) || 1;
+  const stepX = canvas.width / (history.length - 1);
+
+  // Zero line, so a negative run reads as negative at a glance.
+  const zeroY = canvas.height - ((0 - min) / span) * canvas.height;
+  if (min < 0 && max > 0) {
+    ctx.strokeStyle = "#2a2a38";
+    ctx.beginPath();
+    ctx.moveTo(0, zeroY); ctx.lineTo(canvas.width, zeroY); ctx.stroke();
+  }
+
+  ctx.strokeStyle = "#ffd37f";
+  ctx.lineWidth = 1.6 * ratio;
+  ctx.beginPath();
+  history.forEach((point, i) => {
+    const y = canvas.height - ((point.reward - min) / span) * canvas.height;
+    i ? ctx.lineTo(i * stepX, y) : ctx.moveTo(0, y);
+  });
+  ctx.stroke();
+
+  ctx.fillStyle = "#7ddc9a";
+  history.forEach((point, i) => {
+    if (!point.solved) return;
+    const y = canvas.height - ((point.reward - min) / span) * canvas.height;
+    ctx.beginPath();
+    ctx.arc(i * stepX, y, 3 * ratio, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
+async function refresh() {
+  try {
+    const state = await (await fetch("/state", { cache: "no-store" })).json();
+    document.getElementById("s-live").textContent = "live";
+
+    const totals = state.totals;
+    document.getElementById("s-task").textContent = state.title;
+    document.getElementById("s-matches").textContent = totals.matches;
+    document.getElementById("s-episodes").textContent = totals.episodes;
+    document.getElementById("s-solved").textContent = totals.solved;
+    document.getElementById("s-rate").textContent = (totals.solve_rate * 100).toFixed(0) + "%";
+    document.getElementById("s-sps").textContent = totals.steps_per_second;
+    document.getElementById("s-elapsed").textContent = Math.round(state.elapsed) + "s";
+
+    if (state.matches.length) {
+      const empty = document.querySelector("#matches .empty");
+      if (empty) empty.remove();
+      document.getElementById("s-objective").textContent = state.matches[0].objective || "-";
+      state.matches.forEach(updateCard);
+    }
+
+    const board = document.getElementById("s-leaderboard");
+    board.innerHTML = "";
+    for (const row of state.leaderboard.slice(0, 8)) {
+      const li = el("li");
+      li.innerHTML = `<b>${row.policy}</b> #${row.match} &mdash; best ${row.best.toFixed(2)}, ${row.solved}/${row.episodes} solved`;
+      board.append(li);
+    }
+    if (!state.leaderboard.length) board.innerHTML = '<li class="empty">no results yet</li>';
+
+    drawTrend(state.history);
+  } catch (error) {
+    document.getElementById("s-live").textContent = "disconnected";
+  }
+}
+
+refresh();
+setInterval(refresh, 500);
+</script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+name: mindustry-ai-replay
+displayName: "AI Replay"
+author: yamakajump
+main: mindustryai.replay.ReplayMod
+description: "Watch mindustry-ai agents play, with pause, rewind and speed control."
+version: "0.1.0"
+minGameVersion: 154
+hidden: false

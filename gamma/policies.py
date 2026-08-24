@@ -11,7 +11,6 @@ from typing import Any
 
 import numpy as np
 
-from gamma.env import ACTION_TYPES
 
 
 class RandomPolicy:
@@ -33,26 +32,31 @@ class MaskedRandomPolicy:
     nothing except what the masks already told it.
     """
 
-    def __init__(self, action_space, seed: int | None = None) -> None:
+    def __init__(self, action_space, seed: int | None = None, env=None) -> None:
         self.action_space = action_space
         self.rng = np.random.default_rng(seed)
+        # The set of action types depends on whether the agent has a body, so it is read
+        # from the environment rather than from a module constant that only knew about one.
+        self.types = tuple(env.action_types) if env is not None else ("noop", "place", "break")
 
     def act(self, observation: dict[str, np.ndarray], info: dict[str, Any]) -> np.ndarray:
         mask = info.get("action_mask", {})
         action = np.zeros(5, dtype=np.int64)
 
-        legal_types = np.flatnonzero(mask.get("type", np.ones(len(ACTION_TYPES), bool)))
+        legal_types = np.flatnonzero(mask.get("type", np.ones(len(self.types), bool)))
         kind = int(self.rng.choice(legal_types)) if legal_types.size else 0
         action[0] = kind
 
-        if ACTION_TYPES[kind] == "noop":
+        if self.types[kind] in ("noop", "unload"):
             return action
 
         legal_blocks = np.flatnonzero(mask.get("block", np.ones(1, bool)))
         if legal_blocks.size:
             action[1] = int(self.rng.choice(legal_blocks))
 
-        positions = mask.get("position")
+        # Mining needs an ore tile, not merely a free one.
+        key = "mineable" if self.types[kind] == "mine" and "mineable" in mask else "position"
+        positions = mask.get(key)
         if positions is not None and positions.any():
             ys, xs = np.nonzero(positions)
             pick = int(self.rng.integers(len(xs)))

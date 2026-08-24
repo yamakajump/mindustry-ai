@@ -1,0 +1,31 @@
+apply plugin: "java"
+
+sourceSets.main.java.srcDirs = ["src"]
+
+repositories {
+    mavenCentral()
+    ivy {
+        url = "https://github.com/"
+        patternLayout { artifact "/[organisation]/[module]/releases/download/[revision]/dependencies.jar" }
+        metadataSources { artifact() }
+    }
+}
+
+java {
+    targetCompatibility = JavaVersion.VERSION_17
+    sourceCompatibility = JavaVersion.VERSION_17
+}
+
+ext {
+    // Must match the client this mod is installed into, and the server that records.
+    mindustryVersion = "v159.7"
+}
+
+dependencies {
+    compileOnly "Anuken:Mindustry:$mindustryVersion"
+}
+
+jar {
+    archiveFileName = "mindustry-ai-replay.jar"
+    from(rootDir) { include "mod.hjson" }
+}

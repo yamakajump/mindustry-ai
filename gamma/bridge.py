@@ -224,6 +224,15 @@ class Bridge:
             message["loadout"] = loadout
         return self.request(message)
 
+    def embody(self) -> dict[str, Any]:
+        """Give the agent a unit, so it plays under a player's limits.
+
+        Until this is called the bridge edits the world directly, which no human can do.
+        Afterwards every action goes through a body with a position, a build range and a
+        mining tier, all enforced by the engine.
+        """
+        return self.request({"cmd": "embody"})
+
     def affordable_blocks(self) -> list[str]:
         """Blocks the core can currently pay for. The mask for the block head."""
         return self.request({"cmd": "blocks"})["affordable"]

@@ -14,5 +14,6 @@ mistake is worth more than a clean history that hides it.
 | [5](0005-in-repo-ppo.md) | PPO implemented in-repo, not pulled from a library | accepted |
 | [6](0006-fixed-timestep-acceleration.md) | Fixed timestep, with speed controlled by frame budget | accepted |
 | [7](0007-pause-based-synchronous-stepping.md) | Synchronous stepping by pausing, not by blocking | accepted |
+| [8](0008-embodied-agent.md) | The agent plays with a body | accepted |
 
 The overall picture these add up to is in [`../architecture.md`](../architecture.md).

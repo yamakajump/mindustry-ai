@@ -23,8 +23,15 @@ from gamma.server import ServerProcess, install_plugin
 from gamma.server_setup import setup_server
 from gamma.tasks import Task
 
-#: Action types, in the order the first action component indexes them.
-ACTION_TYPES = ("noop", "place", "break")
+#: Action types when the agent has no body: it edits the world directly.
+DIRECT_ACTION_TYPES = ("noop", "place", "break")
+
+#: Action types when the agent inhabits a unit, which is what a player can do.
+#: Building is queued rather than applied, and only completes once the unit is in range.
+EMBODIED_ACTION_TYPES = ("noop", "move", "build", "mine", "unload", "break")
+
+#: Kept for callers written before bodies existed.
+ACTION_TYPES = DIRECT_ACTION_TYPES
 
 #: Blocks the agent may place, in a fixed order so the index is stable across episodes.
 #: A deliberately small catalogue for the early curriculum: the full list is hundreds of
@@ -67,10 +74,14 @@ class MindustryEnv(gym.Env):
         blocks: tuple[str, ...] = DEFAULT_BLOCKS,
         jar: str | None = None,
         speed: str = "max",
+        embodied: bool = False,
     ) -> None:
         super().__init__()
         self.task = task
         self.blocks = blocks
+        # An embodied agent plays as a player: it must travel to what it builds and mine
+        # by hand. Slower to train, and the only setting that matches the real game.
+        self.embodied = embodied
         self.bridge_port = bridge_port
         self.game_port = game_port
         self.speed = speed
@@ -153,8 +164,12 @@ class MindustryEnv(gym.Env):
     def _load(self, bridge: Bridge) -> dict[str, Any]:
         """Start a match, from a campaign sector or a custom map."""
         if self.task.sector is not None:
-            return bridge.sector(self.task.sector, self.task.loadout)
-        return bridge.reset(self.task.map_name, self.task.mode)
+            raw = bridge.sector(self.task.sector, self.task.loadout)
+        else:
+            raw = bridge.reset(self.task.map_name, self.task.mode)
+        if self.embodied:
+            raw = bridge.embody()
+        return raw
 
     def _build_spaces(self, obs: dict[str, Any]) -> None:
         spatial = obs["spatial"]
@@ -172,8 +187,12 @@ class MindustryEnv(gym.Env):
         # (type, block, x, y, rotation). Sampling this uniformly is almost always an
         # illegal action, which is what info["action_mask"] is for.
         self._action_space = spaces.MultiDiscrete(
-            [len(ACTION_TYPES), len(self.blocks), width, height, 4]
+            [len(self.action_types), len(self.blocks), width, height, 4]
         )
+
+    @property
+    def action_types(self) -> tuple[str, ...]:
+        return EMBODIED_ACTION_TYPES if self.embodied else DIRECT_ACTION_TYPES
 
     # Conversion ------------------------------------------------------------------
 
@@ -191,18 +210,26 @@ class MindustryEnv(gym.Env):
         }
 
     def _decode(self, action: np.ndarray) -> dict[str, Any] | None:
-        kind = ACTION_TYPES[int(action[0])]
+        kind = self.action_types[int(action[0])]
+        x, y = int(action[2]), int(action[3])
+
         if kind == "noop":
             return None
-        if kind == "place":
+        if kind in ("place", "build"):
             return {
-                "type": "place",
+                "type": kind,
                 "block": self.blocks[int(action[1])],
-                "x": int(action[2]),
-                "y": int(action[3]),
-                "rotation": int(action[4]),
+                "x": x, "y": y, "rotation": int(action[4]),
             }
-        return {"type": "break", "x": int(action[2]), "y": int(action[3])}
+        if kind == "move":
+            return {"type": "move", "x": x, "y": y}
+        if kind == "mine":
+            return {"type": "mine", "x": x, "y": y}
+        if kind == "unload":
+            return {"type": "unload"}
+        if kind == "break":
+            return {"type": "demolish" if self.embodied else "break", "x": x, "y": y}
+        return None
 
     def _masks(self, obs: dict[str, Any]) -> dict[str, np.ndarray]:
         """Legality hints for the action heads.
@@ -229,16 +256,50 @@ class MindustryEnv(gym.Env):
         # practice: a broke agent that keeps choosing "place" spends the rest of the
         # episode being refused. Measured on a random policy, an unmasked type head
         # produced 98 refusals out of 120 once the starting copper ran out.
+        if not self.embodied:
+            type_mask = np.array(
+                [True, bool(block_mask.any() and free.any()), bool(owned.any())],
+                dtype=bool,
+            )
+            return {"type": type_mask, "block": block_mask, "position": free}
+
+        unit = obs.get("unit", {})
+        carrying = int(unit.get("carrying", 0))
+        capacity = int(unit.get("capacity", 1))
+
+        # Ore the unit is actually allowed to mine, by hardness. Masking this is not a
+        # convenience: an agent that keeps ordering a tier-1 unit onto thorium learns
+        # nothing except that mining fails.
+        mineable = np.zeros_like(free)
+        for name in channels:
+            if name.startswith("ore_"):
+                mineable |= channel(name) > 0
+
+        # Ore under a building is not reachable, and the engine agrees: validMine requires
+        # a bare tile. Without this the nearest ore to a unit standing on its core is the
+        # core's own footprint, and the agent mines nothing for the whole episode while
+        # every action is happily accepted.
+        mineable &= channel("block") == 0
+        mineable &= carrying < capacity
+
         type_mask = np.array(
             [
-                True,                                          # noop is always legal
-                bool(block_mask.any() and free.any()),         # place
-                bool(owned.any()),                             # break
+                True,                                   # noop
+                True,                                   # move, always available
+                bool(block_mask.any() and free.any()),  # build
+                bool(mineable.any()),                   # mine
+                carrying > 0,                           # unload, pointless when empty
+                bool(owned.any()),                      # break
             ],
             dtype=bool,
         )
 
-        return {"type": type_mask, "block": block_mask, "position": free}
+        return {
+            "type": type_mask,
+            "block": block_mask,
+            "position": free,
+            "mineable": mineable,
+        }
 
     # Gym API ---------------------------------------------------------------------
 

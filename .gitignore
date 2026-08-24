@@ -62,3 +62,6 @@ Thumbs.db
 .env
 .env.local
 .claude/projet/
+
+# Le jar du mod est construit, pas versionne
+replay-mod/build/
