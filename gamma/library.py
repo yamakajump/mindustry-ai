@@ -1,8 +1,8 @@
 """Designs the search discovered, stored so they can be played.
 
-A layout found by `gamma.evolve` is a rectangle of blocks that delivered ore on one world.
-To be worth anything it has to leave the bench: be written down, put back on a map, and
-beaten against the routine a person wrote by hand. That is what this holds.
+A layout found by the forge is a rectangle of blocks that delivered ore on one world. To
+be worth anything it has to leave the bench: be written down, put back on a map, and beaten
+against the routine a person wrote by hand. That is what this holds.
 
 Positions are kept **relative to the core**, not to the rectangle they were evolved in. A
 design is a claim about where things go with respect to the base, and the rectangle was
@@ -75,12 +75,17 @@ class Design:
 
 
 def from_evolution(path: Path, name: str | None = None) -> Design:
-    """Read what `tools/evolve_layout.py` wrote, and re-anchor it on the core.
+    """Read what the forge wrote, and re-anchor it on the core.
 
-    The evolution reports cells inside its test rectangle, along with where that rectangle
-    sat and where the core was. Subtracting one from the other is the whole conversion,
-    and it is done here rather than there so the search stays free to move its rectangle
-    around without every stored design becoming wrong.
+    The search reports cells inside its test rectangle, along with where that rectangle sat
+    and where the core was. Subtracting one from the other is the whole conversion, and it
+    is done here rather than there so the search stays free to move its rectangle around
+    without every stored design becoming wrong.
+
+    The search itself lives in [mindustry-forge](https://github.com/yamakajump/mindustry-forge). It is a
+    different job with a different loop: it asks what the best machine for a job is, over
+    minutes, and this project asks where and when to build one, over hours. What crosses
+    between them is this file and nothing else.
     """
     report = json.loads(Path(path).read_text(encoding="utf-8"))
     best = report.get("best")

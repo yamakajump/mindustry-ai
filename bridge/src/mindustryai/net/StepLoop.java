@@ -155,6 +155,8 @@ public class StepLoop implements ApplicationListener {
                 case "observe" -> respond(observation(false));
                 case "scene" -> handleScene();
                 case "region" -> handleRegion(message);
+                case "give" -> handleGive(message);
+                case "clear_ore" -> handleClearOre(message);
                 case "close" -> handleClose();
                 default -> server.reply(error("unknown command: " + command.asString()));
             }
@@ -343,6 +345,85 @@ public class StepLoop implements ApplicationListener {
      * between "this design is close" and "this design is noise", and it is the engine's
      * own number rather than a guess about what closeness means.
      */
+    /**
+     * Put items into a building, so a bench can stand in for the rest of a factory.
+     *
+     * <p>A design that turns coal and sand into silicon cannot be measured without coal
+     * and sand, and mining them is a different problem being smuggled into this one. A
+     * filled container beside the work area says "assume this arrives" without saying
+     * anything about how.
+     */
+    private void handleGive(Jval message) {
+        int x = message.get("x") == null ? 0 : message.get("x").asInt();
+        int y = message.get("y") == null ? 0 : message.get("y").asInt();
+        String itemName = message.get("item") == null ? "" : message.get("item").asString();
+        int amount = message.get("amount") == null ? 0 : message.get("amount").asInt();
+
+        var tile = Vars.world.tile(x, y);
+        if (tile == null || tile.build == null) {
+            server.reply(error("no building at " + x + "," + y));
+            return;
+        }
+        var item = Vars.content.item(itemName);
+        if (item == null) {
+            server.reply(error("no such item: " + itemName));
+            return;
+        }
+        if (tile.build.items == null) {
+            server.reply(error(tile.block().name + " holds no items"));
+            return;
+        }
+
+        tile.build.items.set(item, Math.min(amount, tile.block().itemCapacity));
+
+        Jval reply = Jval.newObject();
+        reply.put("ok", true);
+        reply.put("held", tile.build.items.get(item));
+        server.reply(reply.toString());
+    }
+
+    /**
+     * Scrape a named ore off the map around a point.
+     *
+     * <p>A bench asking for a conveyor line has to make one necessary, and ore lying
+     * against the destination makes it unnecessary: the engine pushes from a drill into
+     * any adjacent building, so one drill on that ore delivers with no line at all. It is
+     * the correct answer to a question nobody asked, and a search finds it in two
+     * generations and never looks further.
+     *
+     * <p>Blanking that ore out of the scoring is not enough: it stays on the map and a
+     * drill can still sit on it. It has to leave the world.
+     */
+    private void handleClearOre(Jval message) {
+        int x = message.get("x") == null ? 0 : message.get("x").asInt();
+        int y = message.get("y") == null ? 0 : message.get("y").asInt();
+        int radius = message.get("radius") == null ? 0 : message.get("radius").asInt();
+        String itemName = message.get("item") == null ? "" : message.get("item").asString();
+
+        var item = Vars.content.item(itemName);
+        if (item == null) {
+            server.reply(error("no such item: " + itemName));
+            return;
+        }
+
+        int cleared = 0;
+        for (int tx = x - radius; tx <= x + radius; tx++) {
+            for (int ty = y - radius; ty <= y + radius; ty++) {
+                var tile = Vars.world.tile(tx, ty);
+                if (tile == null || tile.drop() != item) {
+                    continue;
+                }
+                tile.setOverlayNet(mindustry.content.Blocks.air);
+                cleared++;
+            }
+        }
+
+        Jval reply = Jval.newObject();
+        reply.put("ok", true);
+        reply.put("cleared", cleared);
+        server.reply(reply.toString());
+    }
+
     private void handleRegion(Jval message) {
         int x = message.get("x") == null ? 0 : message.get("x").asInt();
         int y = message.get("y") == null ? 0 : message.get("y").asInt();

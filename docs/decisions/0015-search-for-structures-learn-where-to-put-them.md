@@ -40,9 +40,9 @@ nothing until all three arrive at once.
 
 Two stages that do different jobs, because they are good at different things:
 
-1. **Discovery**, in `gamma/evolve.py`. A population of layouts, each one stamped into a
-   real game and scored on what it actually delivers to the core. Selection, crossover,
-   mutation. Nothing in it knows what a conveyor is for.
+1. **Discovery**, in [mindustry-forge](https://github.com/yamakajump/mindustry-forge). A population of
+   layouts, each one stamped into a real game and scored on what it actually delivers to
+   the core. Selection, crossover, mutation. Nothing in it knows what a conveyor is for.
 2. **Play**, the learned policy, which keeps the part it is good at: which world, which
    patch, when to expand, when to defend.
 
@@ -73,6 +73,24 @@ collapse in [this walkthrough of evolving Factorio
 blueprints](https://www.youtube.com/watch?v=mGOKKtIDNbk), applied to the genome instead of
 to the generator: do not make the search cleverer, make the invalid impossible to write
 down.
+
+## Where the search went
+
+It left. The search lives in [mindustry-forge](https://github.com/yamakajump/mindustry-forge) and this
+repository no longer carries it.
+
+The two turned out to be different jobs with incompatible loops. The search asks what the
+best machine for a job is and answers in minutes; this project asks where and when to
+build one and answers in hours. Keeping both here meant one repository whose test suite,
+readme and roadmap described two audiences, and a search engine that an agent must never
+call anyway: a player will wait ten minutes for a good design, an agent mid-match cannot
+wait at all.
+
+So the forge fills a warehouse offline and the agent shops from it.
+[`gamma/library.py`](../../gamma/library.py) reads that warehouse and
+[`gamma/adapt.py`](../../gamma/adapt.py) puts what it finds where the ore actually is.
+Those two are agent concerns and stay. The contract between the repositories is the stored
+design and nothing else.
 
 ## Consequences
 

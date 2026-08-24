@@ -100,6 +100,22 @@ class ServerProcess:
         self.send(command)
         return self.wait_for(pattern, timeout=timeout, since=since)
 
+    def wait_for_bridge(self, port: int, timeout: float = 90.0) -> str:
+        """Block until the bridge is listening, or say why it is not.
+
+        Waiting on the success line alone is what makes a busy port look like a hang: the
+        plugin logs its failure and the server carries on without a bridge, perfectly
+        healthy from outside, so the caller waits the whole timeout and is then told only
+        that a pattern never appeared. Watching for both outcomes turns two minutes of
+        silence into one line naming the port and the reason.
+        """
+        line = self.wait_for(
+            rf"listening on 127\.0\.0\.1:{port}|BRIDGE FAILED", timeout=timeout
+        )
+        if "BRIDGE FAILED" in line:
+            raise RuntimeError(line.strip())
+        return line
+
     def wait_for(self, pattern: str, timeout: float = 30.0, since: int = 0) -> str:
         """Block until an output line matches, and return that line.
 

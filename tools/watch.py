@@ -149,7 +149,7 @@ def main() -> None:
     with ServerProcess(
         server_dir, jvm_args=[f"-Dmindustryai.port={BRIDGE_PORT}"], port=args.port
     ) as server:
-        server.wait_for(rf"listening on 127\.0\.0\.1:{BRIDGE_PORT}", timeout=120)
+        server.wait_for_bridge(BRIDGE_PORT, timeout=120)
 
         with Bridge(port=BRIDGE_PORT) as bridge:
             # A generated sector has no name, so the index is the only handle on it. This

@@ -109,8 +109,8 @@ class MindustryEnv(gym.Env):
         #: Handed a structure as one action, the policy stops spelling and starts deciding
         #: which patch, how many, and when, which is the part worth learning.
         #:
-        #: Nothing here is a human blueprint. Every design comes out of `gamma/evolve.py`,
-        #: scored on what it delivered in a real game.
+        #: Nothing here is a human blueprint. Every design comes out of the forge, scored
+        #: on what it delivered in a real game.
         self.designs = tuple(designs)
         # Designs share the block dimension of the action space rather than getting one of
         # their own. Widening the space without widening the mask would have been worse
@@ -167,7 +167,7 @@ class MindustryEnv(gym.Env):
             port=self.game_port,
         )
         self._server.__enter__()
-        self._server.wait_for(rf"listening on 127\.0\.0\.1:{self.bridge_port}", timeout=90)
+        self._server.wait_for_bridge(self.bridge_port, timeout=90)
         self._server.command(f"bridge-speed {self.speed}", r"speed set")
 
         # Generous on purpose: a step on a developed base, on a machine sharing eight

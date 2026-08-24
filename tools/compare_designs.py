@@ -200,7 +200,7 @@ def play(env, policy, steps: int) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("design", type=Path,
-                        help="a report written by tools/evolve_layout.py")
+                        help="a report written by the forge")
     parser.add_argument("--map", default="Ancient_Caldera")
     parser.add_argument("--world-seed", type=int, default=None,
                         help="defaults to the world the design was found on, which is the "

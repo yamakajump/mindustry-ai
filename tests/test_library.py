@@ -16,7 +16,7 @@ from gamma.library import Design, Placement, from_evolution, load, save
 
 
 def bench_report(tmp_path, cells, origin=(120, 21), core=(130, 32)):
-    """A report shaped like the one `tools/evolve_layout.py` writes."""
+    """A report shaped like the one the forge writes."""
     path = tmp_path / "run.json"
     path.write_text(json.dumps({
         "map": "Ancient_Caldera", "genome": "parts", "world_seed": 16, "item": "copper",

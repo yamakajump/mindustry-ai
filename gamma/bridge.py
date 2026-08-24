@@ -264,6 +264,25 @@ class Bridge:
             "width": int(width), "height": int(height),
         })
 
+    def give(self, x: int, y: int, item: str, amount: int) -> dict[str, Any]:
+        """Put items into a building, so a bench can stand in for the rest of a factory."""
+        return self.request({
+            "cmd": "give", "x": int(x), "y": int(y),
+            "item": item, "amount": int(amount),
+        })
+
+    def clear_ore(self, x: int, y: int, radius: int, item: str) -> dict[str, Any]:
+        """Scrape a named ore off the map around a point.
+
+        A bench asking for a conveyor line has to make one necessary, and ore lying against
+        the destination makes it unnecessary: the engine pushes from a drill into any
+        adjacent building, so one drill on that ore delivers with no line at all.
+        """
+        return self.request({
+            "cmd": "clear_ore", "x": int(x), "y": int(y),
+            "radius": int(radius), "item": item,
+        })
+
     def sectors(self) -> dict[str, Any]:
         """Every procedural sector on Serpulo, with the threat the game assigned it."""
         return self.request({"cmd": "sectors"})

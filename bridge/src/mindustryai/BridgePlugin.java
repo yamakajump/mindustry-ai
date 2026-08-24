@@ -43,7 +43,12 @@ public class BridgePlugin extends Plugin {
         try {
             server.start();
         } catch (IOException e) {
-            Log.err("[mindustry-ai] could not listen on port @: @", port, e.getMessage());
+            // Said loudly and in one line, because the server carries on without a bridge
+            // and looks perfectly healthy from outside. What the caller sees otherwise is
+            // a two-minute wait for a line that will never come, timing out on a message
+            // that does not mention the port, while another process quietly holds it.
+            Log.err("[mindustry-ai] BRIDGE FAILED: could not listen on 127.0.0.1:@ (@). "
+                + "Another process is probably holding that port.", port, e.getMessage());
         }
     }
 

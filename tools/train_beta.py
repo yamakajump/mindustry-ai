@@ -490,7 +490,7 @@ def main() -> None:
     parser.add_argument("--root", default="mindustry-beta")
     parser.add_argument("--out", type=Path, default=Path("checkpoints"))
     parser.add_argument("--designs", default="docs/designs.json",
-                        help="structures discovered by tools/evolve_layout.py, offered to "
+                        help="structures discovered by the forge, offered to "
                              "the policy as single actions; pass an empty string to train "
                              "on the primitives alone")
     parser.add_argument("--resume", action="store_true", default=True,
