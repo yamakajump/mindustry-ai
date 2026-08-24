@@ -1,7 +1,11 @@
 # 13. Reward capability, not stock, and shape it so it cannot lie
 
-Status: accepted
+Status: superseded by [14](0014-milestones-over-potential.md)
 Date: 2026-08-24
+
+> The shaping described here was measured and did not move the policy: entropy 12.067
+> to 11.672 over eleven updates, policy loss 0.009. What replaced it, and what the
+> research says about why, is in [decision 14](0014-milestones-over-potential.md).
 
 ## Context
 

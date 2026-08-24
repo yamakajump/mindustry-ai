@@ -1,7 +1,9 @@
 package mindustryai.net;
 
+import arc.Events;
 import arc.util.serialization.Jval;
 import mindustry.Vars;
+import mindustry.game.EventType;
 import mindustry.type.ItemStack;
 import mindustry.world.Block;
 import mindustry.world.Build;
@@ -56,6 +58,14 @@ public class ActionExecutor {
 
         pay(block);
         tile.setBlock(block, Vars.state.rules.defaultTeam, rotation);
+        // Placing a block through the world does not announce itself. A player's build
+        // finishes through the build queue and fires this, which is what the engine's own
+        // counters listen to, so direct mode was silently invisible to every statistic the
+        // game keeps: nothing placed, nothing built. Fired here so the two modes are
+        // indistinguishable from outside, which is the only reason direct mode is allowed
+        // to exist at all.
+        Events.fire(new EventType.BlockBuildEndEvent(
+            tile, null, Vars.state.rules.defaultTeam, false, null));
         return Result.ok();
     }
 
@@ -69,6 +79,8 @@ public class ActionExecutor {
             return Result.rejected("no tile at " + x + "," + y);
         }
         tile.setNet(mindustry.content.Blocks.air);
+        Events.fire(new EventType.BlockBuildEndEvent(
+            tile, null, Vars.state.rules.defaultTeam, true, null));
         return Result.ok();
     }
 

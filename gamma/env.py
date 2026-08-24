@@ -211,7 +211,11 @@ class MindustryEnv(gym.Env):
         answer that is already known.
         """
         if self._pool is None:
-            self._pool = build_pool(bridge.sectors(), threat_limit=self.task.threat_limit)
+            self._pool = build_pool(
+                bridge.sectors(),
+                threat_limit=self.task.threat_limit,
+                worlds=self.task.worlds,
+            )
         self.sector_index = self._pool.pick(self._rng, evaluating=self.evaluating)
         return self.sector_index
 

@@ -48,7 +48,12 @@ class SectorPool:
 EVAL_SHARE = 5
 
 
-def build_pool(listing: dict, threat_limit: float = 1.0, seed: int = 20260824) -> SectorPool:
+def build_pool(
+    listing: dict,
+    threat_limit: float = 1.0,
+    seed: int = 20260824,
+    worlds: int | None = None,
+) -> SectorPool:
     """Split the planet's generated sectors into a training set and a held-out set.
 
     The split is by a seeded shuffle rather than by index, because sector indices follow
@@ -75,7 +80,12 @@ def build_pool(listing: dict, threat_limit: float = 1.0, seed: int = 20260824) -
     random.Random(seed).shuffle(shuffled)
 
     held = tuple(sorted(shuffled[::EVAL_SHARE]))
-    trained = tuple(sorted(i for i in shuffled if i not in set(held)))
+    rest = [i for i in shuffled if i not in set(held)]
+
+    # The cap applies to the training half only. Narrowing what an agent trains on is a
+    # curriculum decision; narrowing what it is judged on would just make the measurement
+    # easier, which is the one thing it must not be.
+    trained = tuple(sorted(rest if worlds is None else rest[:worlds]))
 
     # A pool with nothing to train on is a configuration mistake, not a small pool.
     if not trained:

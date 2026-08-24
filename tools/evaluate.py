@@ -41,6 +41,10 @@ class Outcome:
     wave: int
     built: int
     solved: bool
+    #: Ore a machine delivered to the core. Hand mining is not counted, by the engine.
+    produced: int
+    #: Milestones the episode reached, by name.
+    reached: frozenset[str]
 
 
 def summarise(name: str, outcomes: list[Outcome]) -> dict:
@@ -57,7 +61,17 @@ def summarise(name: str, outcomes: list[Outcome]) -> dict:
         "worst_reward": round(min(rewards), 3) if rewards else 0.0,
         "mean_wave": round(statistics.fmean(o.wave for o in outcomes), 2) if outcomes else 0,
         "mean_built": round(statistics.fmean(o.built for o in outcomes), 1) if outcomes else 0,
+        "mean_produced": round(statistics.fmean(o.produced for o in outcomes), 1) if outcomes else 0,
         "solved": sum(o.solved for o in outcomes),
+        # How often each rung of the ladder was reached, which says far more than a mean
+        # reward does. A policy that never once reaches `automation` has not started
+        # playing the game, whatever its score.
+        "milestones": {
+            stone.name: round(
+                sum(stone.name in o.reached for o in outcomes) / len(outcomes), 2
+            )
+            for stone in tasks.MILESTONES
+        } if outcomes else {},
     }
 
 
@@ -82,6 +96,12 @@ def play(env, policy, task, steps: int) -> Outcome:
         wave=int(raw.get("wave", 0)),
         built=int(raw.get("built", 0)),
         solved=bool(task.succeeded(raw)),
+        produced=sum(int(a) for a in raw.get("produced", {}).values()),
+        # Read off the final observation rather than accumulated along the way: every
+        # milestone counter is cumulative, so the last one holds the whole episode.
+        reached=frozenset(
+            stone.name for stone in tasks.MILESTONES if stone.read(raw) >= stone.threshold
+        ),
     )
 
 
@@ -188,10 +208,14 @@ def main() -> None:
             f"{summary['policy']:>12}  reward {summary['mean_reward']:+8.3f} "
             f"+-{summary['reward_spread']:6.3f}  worst {summary['worst_reward']:+8.3f}  "
             f"wave {summary['mean_wave']:5.2f}  built {summary['mean_built']:6.1f}  "
+            f"produced {summary['mean_produced']:8.1f}  "
             f"solved {summary['solved']}/{summary['episodes']}  "
             f"over {summary['sectors']} unseen sectors",
             flush=True,
         )
+        reached = [f"{n} {r:.0%}" for n, r in summary["milestones"].items() if r > 0]
+        print(f"{'':>12}  {' | '.join(reached) if reached else 'no milestone reached'}",
+              flush=True)
 
     env.close()
     report["seconds"] = round(time.time() - started, 1)

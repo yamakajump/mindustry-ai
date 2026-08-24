@@ -769,6 +769,50 @@ public class StepLoop implements ApplicationListener {
         }
         obs.put("items", items);
 
+        // Counters the engine already keeps, reset by `logic.play()` at the start of every
+        // episode. They matter because they are **monotonic**: a milestone paid the step a
+        // counter first crosses a threshold can be paid at most once per episode, without
+        // the reward function having to remember anything. A count of what is standing
+        // right now goes up and down, so paying for it pays for building and rebuilding
+        // the same conveyor forever.
+        Jval stats = Jval.newObject();
+        Jval produced = Jval.newObject();
+        Jval placed = Jval.newObject();
+
+        if (playing && Vars.state.stats != null) {
+            var game = Vars.state.stats;
+            stats.put("enemy_units_destroyed", game.enemyUnitsDestroyed);
+            stats.put("buildings_built", game.buildingsBuilt);
+            stats.put("buildings_destroyed", game.buildingsDestroyed);
+            stats.put("buildings_deconstructed", game.buildingsDeconstructed);
+            stats.put("units_created", game.unitsCreated);
+
+            // The engine counts items that reach the core *through a transport block*, and
+            // only those: a hand deposit goes through `handleStack` and is never counted, a
+            // launch loadout is written straight into the inventory. So this is automated
+            // income, separated from hand mining by the game itself rather than by anything
+            // invented here. It is the one number that says a factory exists.
+            for (var entry : game.coreItemCount.entries()) {
+                if (entry.value > 0) {
+                    produced.put(entry.key.name, entry.value);
+                }
+            }
+
+            // Blocks fully built, cumulative, grouped by the game's own category. Enough to
+            // notice a first drill, a first conveyor, a first turret, without this file
+            // holding a list of block names that would rot the next time the game adds one.
+            for (var entry : game.placedBlockCount.entries()) {
+                if (entry.value > 0 && entry.key.category != null) {
+                    String name = entry.key.category.name();
+                    placed.put(name, placed.has(name) ? placed.get(name).asInt() + entry.value : entry.value);
+                }
+            }
+        }
+
+        obs.put("stats", stats);
+        obs.put("produced", produced);
+        obs.put("placed", placed);
+
         if (body != null && body.unit() != null) {
             var unit = body.unit();
             Jval self = Jval.newObject();

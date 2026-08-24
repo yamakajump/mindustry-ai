@@ -78,6 +78,8 @@ class EnvWorker:
         task = tasks.get(self.args.task)
         if self.args.max_steps:
             task = replace(task, max_steps=self.args.max_steps)
+        if self.args.worlds:
+            task = replace(task, worlds=self.args.worlds)
 
         jar = str(ensure_jar())
 
@@ -343,6 +345,9 @@ def main() -> None:
     parser.add_argument("--channels", type=int, default=14,
                         help="observation channels, pinned so parallel envs agree")
     parser.add_argument("--max-steps", type=int, default=0)
+    parser.add_argument("--worlds", type=int, default=0,
+                        help="train across at most N worlds instead of the whole pool; "
+                             "the held-out set is unaffected either way")
     parser.add_argument("--port", type=int, default=8800)
     parser.add_argument("--watch", type=int, default=0,
                         help="index of the match to run at watchable speed, -1 for none")

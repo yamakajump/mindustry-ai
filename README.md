@@ -104,19 +104,30 @@ The agent has to work out for itself that a drill mines, that a drill needs ore 
 that ore has to reach the core. Nothing tells it. The trick is to grade it on something
 that happens to rise faster once it has figured that out.
 
-The task's own reward stays sparse: one point per wave survived. Everything dense comes
-from **potential-based shaping**, which [provably cannot change which policy is
-optimal](https://people.eecs.berkeley.edu/~pabbeel/cs287-fa09/readings/NgHaradaRussell-shaping-ICML1999.pdf).
-That is the whole reason to use it: it guides without teaching a shortcut, and it cannot be
-pumped, because the reward along any loop telescopes to zero. Placing and breaking the same
-conveyor earns exactly nothing.
+It is graded on a **ladder of firsts**. A first drill. A first conveyor. The first ore a
+machine delivered without a hand carrying it, which is worth six times the drill. A
+hundred of it, a thousand, ten thousand. A first turret, a first kill, a first generator,
+a first crafter. Each rung is paid **once per episode and never again**, because each one
+reads a counter that only climbs, so the ladder cannot be farmed by building and breaking
+the same conveyor.
 
-The potential measures **capability, not stock**: a core that is alive, ore banked on a log,
-buildings standing on a log. The logs matter. A linear reward on ore makes hand mining
-optimal, because hand mining fills the core and a drill costs resources. A saturating one
-rewards getting an economy started, and the only way to keep it rising is throughput, which
-is what a drill has and a pair of hands does not. See
-[decision 13](docs/decisions/0013-reward-capability-not-stock.md).
+On top of the ladder, one number paid per unit: **ore a machine delivered to the core.**
+The engine draws that line itself. A conveyor hands items over through `handleItem` and
+the game counts it; a unit banking a stack goes through `handleStack` and it does not. So
+automation is separated from hand mining by Mindustry rather than by anything invented
+here, and hand mining pays a tenth as much, which means carrying ore in is always the
+worse way to earn the same reward.
+
+This replaced a potential function that was provably safe and measurably inert: entropy
+12.067 to 11.672 over eleven updates, policy loss 0.009. The shape it replaced it with is
+not invented either. On [microRTS](https://arxiv.org/abs/2010.03956), the closest
+published build-and-fight benchmark, a sparse agent scored **0.00 out of 10** on producing
+combat units and an agent on plain additive event rewards scored **9.57**.
+[Factorio](https://arxiv.org/abs/2503.09617) scores on the value of what is *produced*
+rather than held. [Crafter](https://arxiv.org/abs/2109.06780) pays +1 the first time each
+of its twenty-two achievements is unlocked in an episode and nothing afterwards. Same
+shape, three times over. See
+[decision 14](docs/decisions/0014-milestones-over-potential.md).
 
 ## Train, and watch it happen
 
@@ -151,9 +162,11 @@ Tasks, in the order they were built:
 | `GZ_capture` | Ground Zero | the campaign's own objective: survive to wave 10 |
 | `endless` | one fixed map | survive and produce, no finishing line |
 | **`frontier`** | **a new generated world every episode** | **land, build an economy, hold it** |
+| `frontier_shaped` | the same worlds | the control: `frontier` graded the old way, so the reward change is measured rather than argued about |
 
-Useful flags: `--envs N`, `--direct` to drop the body and train faster, `--watch N` to pick
-which match runs at a speed a person can follow, `--no-record` to skip replays.
+Useful flags: `--envs N`, `--worlds N` to narrow the training pool without touching the
+held-out half, `--direct` to drop the body and train faster, `--watch N` to pick which
+match runs at a speed a person can follow, `--no-record` to skip replays.
 
 ### Or join it in the real game
 

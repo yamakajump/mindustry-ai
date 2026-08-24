@@ -72,3 +72,14 @@ def test_episodes_draw_from_the_half_they_were_asked_for() -> None:
 
     assert trained <= set(pool.train)
     assert held <= set(pool.evaluate)
+
+
+def test_a_narrowed_pool_leaves_the_measurement_alone() -> None:
+    """Shrinking what an agent trains on is a curriculum choice. Shrinking what it is
+    judged on would only make the number flattering, so the cap must not touch it."""
+    whole = build_pool(listing(60))
+    narrow = build_pool(listing(60), worlds=5)
+
+    assert len(narrow.train) == 5
+    assert narrow.evaluate == whole.evaluate
+    assert set(narrow.train) <= set(whole.train)
