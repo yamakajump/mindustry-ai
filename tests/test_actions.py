@@ -130,8 +130,15 @@ def test_a_built_chain_delivers_ore_to_the_core(acting) -> None:
         })
 
     before = client.observe()["items"].get("copper", 0)
-    for _ in range(40):
-        result = client.step(repeat=300)
 
-    after = result["items"].get("copper", 0)
-    assert after > before, f"the chain delivered nothing: {before} -> {after}"
+    # Runs until delivery is observed rather than for a fixed budget. A drill's output
+    # depends on how far the chain had to run, and a fixed number of steps made this pass
+    # alone and fail in a full suite for no reason anyone could see.
+    after = before
+    for _ in range(120):
+        result = client.step(repeat=300)
+        after = result["items"].get("copper", 0)
+        if after > before:
+            break
+
+    assert after > before, f"the chain delivered nothing after 36000 ticks: {before} -> {after}"
