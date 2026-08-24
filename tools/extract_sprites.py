@@ -61,7 +61,12 @@ SHEET = re.compile(r"^(?P<group>.+-\d+)-(?P<frame>\d+)$")
 
 #: `sand-floor2` is the second variant of `sand-floor`. The engine picks one per tile from
 #: the tile position, which is what stops a floor tiling into a visible weave.
-VARIANT = re.compile(r"^(?P<base>.*[^\d])(?P<index>\d+)$")
+#:
+#: The hyphen is the whole rule. A variant is a bare digit stuck on the end of a name,
+#: `stone2`; a name that ends in a hyphen and a digit is a block of its own, `dark-panel-3`
+#: or `metal-floor-2`. Collapsing those lost every panel above the first, and they came out
+#: as black squares on a map that had them.
+VARIANT = re.compile(r"^(?P<base>.*[^\d\-])(?P<index>\d+)$")
 
 
 def is_drawn(path: str) -> bool:
@@ -84,21 +89,12 @@ def is_drawn(path: str) -> bool:
     return not (team and team.group(1) not in KEEP_TEAMS)
 
 
-#: `block-1` to `block-4` are the plain plates a turret without a base of its own stands
-#: on, one per block size. They are not variants of a `block-` sprite, and grouping them as
-#: such makes a one-tile turret pick a four-tile plate.
-BASE_PLATE = re.compile(r"^block-\d+$")
-
-
 def group_of(stem: str) -> tuple[str, int]:
     """The logical sprite a file belongs to, and its position within it.
 
     Returns the group name and the frame or variant index, zero-based for sheets and
     one-based for variants, matching how the engine numbers each.
     """
-    if BASE_PLATE.match(stem):
-        return stem, 0
-
     sheet = SHEET.match(stem)
     if sheet:
         return sheet.group("group"), int(sheet.group("frame"))

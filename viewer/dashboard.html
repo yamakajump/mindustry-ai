@@ -1298,6 +1298,12 @@ function drawMatch(canvas, match, terrain, world, zoom, now) {
   ctx.drawImage(background(terrain, world, ox, oy, cols, rows, cell), bx, by);
 
   const tick = lerp(world.fromTick, world.tick, alpha);
+  // Entities are addressed by tile index, which only decodes against the width of the map
+  // they are on. Between two episodes the scene can carry the new world while the terrain
+  // is still the old one, and drawing them together puts the agent and everything it built
+  // in the middle of a map it is not in. Better to draw the ground alone for a frame.
+  if (world.width && world.width !== terrain.width) return;
+
   const view = { ox, oy, cols, rows, cell, sx, sy, now, tick, terrain };
   drawBuildings(ctx, world, view);
   drawBeltItems(ctx, world, view);

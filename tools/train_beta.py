@@ -141,7 +141,12 @@ class EnvWorker:
         """
         try:
             typed = env._bridge.map()
-        except Exception:
+        except Exception as error:
+            # Swallowed, this leaves the viewer holding the map of an earlier episode while
+            # the scene describes the current one, and it draws the agent and everything it
+            # built outside a world that is not the one it is in.
+            print(f"env {self.index}: could not fetch the map, the view will lag: {error!r}",
+                  flush=True)
             return
 
         planes = typed["spatial"]
@@ -155,6 +160,7 @@ class EnvWorker:
             "block": _encode_bytes(planes[tiles * 4:tiles * 6]),
         }
         state.terrain_version += 1
+        state.terrain_size = [typed["width"], typed["height"]]
 
     def _run(self) -> None:
         env = None

@@ -199,6 +199,13 @@ public class StepLoop implements ApplicationListener {
 
         Gamemode mode = Gamemode.valueOf(modeName);
 
+        // Wrapped so anyone watching stays connected across the change. An episode ends
+        // several times an hour, and without this a spectator is dropped every time and has
+        // to rejoin to see the next one. This is the same handshake the official server
+        // uses to change map with players on it.
+        var reloader = new mindustry.net.WorldReloader();
+        reloader.begin();
+
         // The engine keeps team data across a world load: cores, buildings and plans from
         // the previous match survive into the next one. The core of the old map then
         // answers every question about where the base is, on a map where it does not
@@ -210,6 +217,7 @@ public class StepLoop implements ApplicationListener {
         if (!Vars.net.server()) {
             Vars.netServer.openServer();
         }
+        reloader.end();
 
         encoder.rebuild();
         scenes.reset();
@@ -376,6 +384,13 @@ public class StepLoop implements ApplicationListener {
             sector = preset.sector;
         }
 
+        // Wrapped so anyone watching stays connected across the change. An episode ends
+        // several times an hour, and without this a spectator is dropped every time and has
+        // to rejoin to see the next one. This is the same handshake the official server
+        // uses to change map with players on it.
+        var reloader = new mindustry.net.WorldReloader();
+        reloader.begin();
+
         // The engine keeps team data across a world load: cores, buildings and plans from
         // the previous match survive into the next one. The core of the old map then
         // answers every question about where the base is, on a map where it does not
@@ -387,6 +402,7 @@ public class StepLoop implements ApplicationListener {
         if (!Vars.net.server()) {
             Vars.netServer.openServer();
         }
+        reloader.end();
 
         prepareCampaign();
         if (!ensureCore()) {
@@ -530,8 +546,10 @@ public class StepLoop implements ApplicationListener {
         Vars.state.rules.fog = false;
         Vars.state.rules.staticFog = false;
 
-        Log.info("[mindustry-ai] sector prepared: limitMapArea=@ fog=@ waves=@ size=@x@",
-            Vars.state.rules.limitMapArea, Vars.state.rules.fog, Vars.state.rules.waves,
+        Log.info("[mindustry-ai] sector prepared: limit=@ rect=@,@ @x@ fog=@ waves=@ size=@x@",
+            Vars.state.rules.limitMapArea, Vars.state.rules.limitX, Vars.state.rules.limitY,
+            Vars.state.rules.limitWidth, Vars.state.rules.limitHeight,
+            Vars.state.rules.fog, Vars.state.rules.waves,
             Vars.world.width(), Vars.world.height());
 
         for (var block : Vars.content.blocks()) {

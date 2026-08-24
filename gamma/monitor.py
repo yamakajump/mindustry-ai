@@ -253,6 +253,10 @@ class MatchState:
     terrain: dict[str, Any] | None = None
     terrain_version: int = 0
 
+    #: Size of the map the terrain describes. The scene carries its own, and a viewer that
+    #: draws entities against a terrain of a different size puts them nowhere.
+    terrain_size: list[int] = field(default_factory=lambda: [0, 0])
+
     #: Port a real Mindustry client can join to watch this match. The dashboard draws a
     #: map; this is the only way to see the actual game, animations and all.
     game_port: int = 0
@@ -280,6 +284,7 @@ class MatchState:
             "finished": self.finished, "alive": self.alive,
             "built": self.built, "core": self.core, "size": self.size,
             "terrain_version": self.terrain_version,
+            "terrain_size": self.terrain_size,
             "game_port": self.game_port, "watchable": self.watchable,
             "replays": self.replays,
         }
