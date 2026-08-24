@@ -357,6 +357,14 @@ def main() -> None:
                         help="keep a numbered checkpoint every N generations, 0 to disable")
     args = parser.parse_args()
 
+    # The dashboard port is claimed first, and it doubles as the lock on the whole run.
+    # Two runs at once share the same server directories and the same bridge ports, so
+    # each clears the other's servers and reloads worlds underneath it, while the
+    # dashboard describes a run that is no longer the one doing the work. Claiming the
+    # port before anything is destroyed turns that into a refusal.
+    monitor = TrainingMonitor(title=f"beta / {args.task}")
+    url = monitor.serve(args.port, strict=True)
+
     # A killed run leaves its servers holding the ports, and the next one then
     # fails with "no environment started" and no hint as to why.
     kill_servers()
@@ -365,8 +373,6 @@ def main() -> None:
     # A dashboard of grey squares is a fresh clone missing its sprites, and there is no
     # way to guess that from looking at it.
     ensure_assets()
-    monitor = TrainingMonitor(title=f"beta / {args.task}")
-    url = monitor.serve(args.port)
     print(f"dashboard: {url}", flush=True)
     if args.open:
         # Opened before the environments start: they take the better part of a minute to

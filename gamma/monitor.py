@@ -15,6 +15,7 @@ dashboard that is not running when you want it.
 from __future__ import annotations
 
 import json
+import socket
 import threading
 import time
 from dataclasses import dataclass, field
@@ -23,6 +24,15 @@ from pathlib import Path
 from typing import Any
 
 VIEWER_DIR = Path(__file__).resolve().parent.parent / "viewer"
+
+
+def _listening(port: int, host: str = "127.0.0.1") -> bool:
+    """Whether something already answers on this port."""
+    try:
+        with socket.create_connection((host, port), timeout=0.3):
+            return True
+    except OSError:
+        return False
 
 
 class SceneBuffer:
@@ -420,8 +430,15 @@ class TrainingMonitor:
 
     # Serving ---------------------------------------------------------------------
 
-    def serve(self, port: int = 8800) -> str:
-        """Start the HTTP server in the background and return its URL."""
+    def serve(self, port: int = 8800, strict: bool = False) -> str:
+        """Start the HTTP server in the background and return its URL.
+
+        With `strict`, a port already in use is an error rather than something to step
+        around. Stepping around it is what let two training runs start at once, each
+        clearing the other's Mindustry servers and reloading worlds underneath it, while
+        the dashboard on the first port described a run that was no longer the one doing
+        the work.
+        """
         monitor = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -516,14 +533,27 @@ class TrainingMonitor:
         # A dashboard from a previous run may still hold the port. Failing loudly here
         # beats binding nothing and leaving the caller pointed at stale data from a run
         # that ended minutes ago.
-        for candidate in range(port, port + 20):
-            try:
-                self._server = ThreadingHTTPServer(("127.0.0.1", candidate), Handler)
-                break
-            except OSError:
-                continue
+        if strict:
+            # Asked by connecting rather than by binding. Python's HTTP server sets
+            # SO_REUSEADDR, and on Windows that lets a second process take a port another
+            # is already listening on: the bind succeeds, the lock silently is not one,
+            # and two training runs proceed to clear each other's servers.
+            if _listening(port):
+                raise OSError(
+                    f"port {port} is already answering, which almost always means another "
+                    f"training run is going. Stop it first, or pass --port to run beside "
+                    f"it on its own ports."
+                )
+            self._server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
         else:
-            raise OSError(f"no free port between {port} and {port + 19}")
+            for candidate in range(port, port + 20):
+                try:
+                    self._server = ThreadingHTTPServer(("127.0.0.1", candidate), Handler)
+                    break
+                except OSError:
+                    continue
+            else:
+                raise OSError(f"no free port between {port} and {port + 19}")
 
         thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         thread.start()

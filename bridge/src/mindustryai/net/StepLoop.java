@@ -232,6 +232,7 @@ public class StepLoop implements ApplicationListener {
     }
 
     private void handleStep(Jval message) {
+        ensureBody();
         if (!Vars.state.isGame()) {
             server.reply(error("no game in progress, send reset first"));
             return;
@@ -276,6 +277,31 @@ public class StepLoop implements ApplicationListener {
      * every environment; this is what a person watching one match consumes, and asking
      * for it on a match nobody is looking at would be pure waste.
      */
+    /**
+     * Give the agent a body again when it loses the one it had.
+     *
+     * <p>A unit that dies leaves its controller attached to a corpse: every order after
+     * that is accepted and does nothing, and the run keeps scoring an agent that has not
+     * been able to act for the rest of the episode. Silent, and total.
+     *
+     * <p>A player is never in that position. Lose your core unit and you respawn from the
+     * core, which is exactly what this does. With no core there is nothing to respawn
+     * from, and the episode is over anyway.
+     */
+    private void ensureBody() {
+        if (body == null) {
+            return;
+        }
+        var unit = body.unit();
+        if (unit != null && unit.isValid()) {
+            return;
+        }
+        PlayerAgent replacement = PlayerAgent.spawnAtCore();
+        if (replacement != null) {
+            body = replacement;
+        }
+    }
+
     private void handleScene() {
         int agent = body != null && body.unit() != null ? body.unit().id() : -1;
         server.reply(scenes.encode(agent, body == null ? null : body.takeDeposit()).toString());
