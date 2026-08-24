@@ -174,6 +174,14 @@ Useful flags: `--envs N`, `--worlds N` to narrow the training pool without touch
 held-out half, `--direct` to drop the body and train faster, `--no-watch` to drop the
 showcase match, `--no-record` to skip replays.
 
+Every match archives its best five episodes, its latest three, and every episode that
+solved. To watch the best one of a run inside the real game:
+
+```bash
+python tools/watch.py           # best episode of the last run, in the Mindustry client
+python tools/watch.py --list    # everything archived, best first
+```
+
 ### Or join it in the real game
 
 Every environment is a real headless server with its game port open. The watched match

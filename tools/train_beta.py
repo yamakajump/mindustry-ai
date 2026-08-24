@@ -139,11 +139,19 @@ class EnvWorker:
             speed=str(self.args.watch_speed) if watched else "max",
         )
 
-        # Recorded on the watched match alone. Recording costs a map fetch per episode
-        # and a compressed write per step, which is nothing next to one environment and
-        # far too much across all of them.
+        # Every match records, not just the one being watched.
+        #
+        # Recording only the watched match records the wrong episodes. The watched match
+        # is the one a person happens to be looking at, and the episodes worth keeping are
+        # the ones that went well, wherever they happened. Measured on a real run: the best
+        # episode scored 392 with 2,739 ore automated, and it was never written to disk,
+        # while the two files that were kept scored -38 and -29.
+        #
+        # The archive keeps the best five, the latest three and every solved episode per
+        # match, so twenty-five of them cost single-digit megabytes rather than growing
+        # without bound.
         inner: Any = env
-        if watched and self.args.record:
+        if self.args.record:
             self.archive = ReplayArchive(Path(self.args.replays) / f"match{self.index}")
             self.recorder = ReplayRecorder(env, self.archive.pending(0))
             self.monitor.register_replays(self.index, self.archive)

@@ -7,6 +7,8 @@ game rendering it.
 No client mod is needed. The training server already speaks Mindustry's own network
 protocol, so a stock client can simply join it.
 
+    python tools/watch.py                      # the best episode of the last training run
+    python tools/watch.py --list               # what else is there, best first
     python tools/watch.py replays/showcase/alpha-t1.jsonl.gz
 
 Then in Mindustry: Play, Join Game, 127.0.0.1:6567. The replay starts on its own once you
@@ -18,6 +20,7 @@ from __future__ import annotations
 import argparse
 import gzip
 import json
+import re
 import time
 from pathlib import Path
 
@@ -37,6 +40,30 @@ def read_replay(path: Path) -> tuple[dict, list[dict]]:
     return header, frames
 
 
+#: `ep000012-pos039213.jsonl.gz`. The score is the reward times a hundred, and negatives
+#: say `neg` rather than carrying a minus, which no filename should have to.
+_SCORED = re.compile(r"^ep(\d+)-(neg|pos)(\d+)\.jsonl\.gz$")
+
+
+def scored(path: Path) -> float | None:
+    """The reward a recording was archived under, or None if it is still pending."""
+    match = _SCORED.match(path.name)
+    if match is None:
+        return None
+    return int(match.group(3)) / 100 * (-1 if match.group(2) == "neg" else 1)
+
+
+def best_replays(root: Path, limit: int = 10) -> list[tuple[float, Path]]:
+    """Every archived episode under a directory, best first.
+
+    A training run leaves one archive per match, so the good episode is somewhere among
+    twenty-five folders and there is no reason to make a person go looking for it.
+    """
+    found = [(score, path) for path in sorted(root.rglob("ep*.jsonl.gz"))
+             if (score := scored(path)) is not None]
+    return sorted(found, key=lambda row: -row[0])[:limit]
+
+
 def someone_watching(server: ServerProcess) -> bool:
     """Whether a player has joined. The server says so in its status line."""
     try:
@@ -50,13 +77,30 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("replay", type=Path, help="a .jsonl.gz recorded episode")
+    parser.add_argument("replay", type=Path, nargs="?", default=Path("replays/live"),
+                        help="a recorded episode, or a directory to take the best from")
+    parser.add_argument("--list", action="store_true",
+                        help="list the best recordings under the directory and stop")
     parser.add_argument("--speed", default="2", help="simulation speed, 1 is realtime")
     parser.add_argument("--port", type=int, default=GAME_PORT)
     parser.add_argument("--wait", type=int, default=300, help="seconds to wait for you to join")
     parser.add_argument("--start-anyway", action="store_true", help="do not wait for a player")
     parser.add_argument("--jar", type=Path, default=None)
     args = parser.parse_args()
+
+    if args.replay.is_dir():
+        ranked = best_replays(args.replay)
+        if not ranked:
+            raise SystemExit(f"no archived episode under {args.replay}")
+        if args.list:
+            for score, path in ranked:
+                print(f"{score:+9.2f}  {path}")
+            return
+        score, chosen = ranked[0]
+        print(f"best of {args.replay}: {chosen.name} at {score:+.2f}")
+        args.replay = chosen
+    elif args.list:
+        raise SystemExit("--list wants a directory")
 
     header, frames = read_replay(args.replay)
     jar = args.jar or next((Path("bridge") / "build" / "libs").glob("*.jar"))

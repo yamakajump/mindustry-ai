@@ -243,3 +243,23 @@ def test_throughput_counts_steps_taken_not_steps_into_an_episode() -> None:
 
     assert monitor.snapshot()["totals"]["steps_per_second"] > 0
     assert first.as_dict()["total_steps"] == 4000
+
+
+def test_the_best_recording_is_found_across_every_match(tmp_path) -> None:
+    """A run leaves one archive per match. Asking a person to open twenty-five folders to
+    find the good episode is how the good episode never gets watched."""
+    from tools.watch import best_replays, scored
+
+    for match, names in {
+        "match3": ["ep000000-neg003803.jsonl.gz", "ep000004-pos039213.jsonl.gz"],
+        "match7": ["ep000002-pos000150.jsonl.gz", "ep000009.pending.jsonl.gz"],
+    }.items():
+        (tmp_path / match).mkdir()
+        for name in names:
+            (tmp_path / match / name).write_bytes(b"")
+
+    ranked = best_replays(tmp_path)
+    assert [round(score, 2) for score, _ in ranked] == [392.13, 1.50, -38.03]
+    assert ranked[0][1].name == "ep000004-pos039213.jsonl.gz"
+    # A recording still being written has no score and must not be offered.
+    assert scored(Path("ep000009.pending.jsonl.gz")) is None
