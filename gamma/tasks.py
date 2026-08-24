@@ -66,6 +66,30 @@ def _delivered(item: str, target: int) -> Callable[[Observation], bool]:
     return check
 
 
+def _carrying(scale: float) -> Callable[[Observation, Observation], float]:
+    """Reward what the unit picks up, not only what reaches the core.
+
+    Core stock alone is too sparse for an embodied agent to learn from: it mines for
+    hundreds of steps before a single deposit lands, so every reward in a rollout is
+    exactly zero and the advantages carry no signal at all. Measured on a real rollout:
+    20 steps, 20 rewards, all zero.
+
+    Picking ore up is genuine progress towards the objective rather than invented
+    guidance, which is what separates this from shaping the agent can farm. It is
+    deliberately worth a fifth of banking, so carrying without ever returning stays the
+    worse strategy.
+    """
+
+    def reward(before: Observation, after: Observation) -> float:
+        gained = int(after.get("unit", {}).get("carrying", 0)) - int(
+            before.get("unit", {}).get("carrying", 0)
+        )
+        # Only the gain: the drop when banking is already paid by the core term.
+        return max(0, gained) * scale
+
+    return reward
+
+
 def _throughput(item: str, scale: float) -> Callable[[Observation, Observation], float]:
     """Reward the change in stock, positive or negative.
 
@@ -100,7 +124,9 @@ T1_COPPER = Task(
     # match grants. An earlier target of 400 was unreachable for any policy in this
     # budget, which makes a benchmark that cannot distinguish good from hopeless.
     succeeded=_delivered("copper", 250),
-    reward=_throughput("copper", 0.01),
+    reward=lambda before, after: (
+        _throughput("copper", 0.01)(before, after) + _carrying(0.002)(before, after)
+    ),
 )
 
 T2_TWO_ORES = Task(
@@ -160,3 +186,34 @@ GROUND_ZERO = Task(
 )
 
 CURRICULUM[GROUND_ZERO.name] = GROUND_ZERO
+
+
+ENDLESS = Task(
+    name="endless",
+    description="Survive as long as possible while producing as much as possible.",
+    map_name="Ancient_Caldera",
+    ticks_per_step=30,
+    # Effectively unbounded: an episode ends when the core dies, not when a counter does.
+    max_steps=100_000,
+    # No win condition on purpose. A task with a finishing line teaches an agent to reach
+    # it and stop; this one has no ceiling, so the only way to score more is to build
+    # something that produces more and survives longer.
+    succeeded=lambda obs: False,
+    failed=lambda obs: bool(obs.get("game_over")) or not obs.get("has_core", True),
+    reward=lambda before, after: (
+        # Production, counted across every ore rather than one, so the agent is free to
+        # decide what is worth mining.
+        sum(
+            max(0, int(after.get("items", {}).get(item, 0)) - int(before.get("items", {}).get(item, 0)))
+            for item in set(after.get("items", {})) | set(before.get("items", {}))
+        ) * 0.01
+        # Surviving a wave is worth far more than a few ore, because defence is the part
+        # that keeps production possible at all.
+        + (int(after.get("wave", 0)) - int(before.get("wave", 0))) * 5.0
+        # Losing the core ends everything, and should hurt more than any run of good luck.
+        + (-25.0 if before.get("has_core") and not after.get("has_core") else 0.0)
+    ),
+    success_bonus=0.0,
+)
+
+CURRICULUM[ENDLESS.name] = ENDLESS

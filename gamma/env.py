@@ -46,18 +46,32 @@ DEFAULT_BLOCKS = (
     "duo",
 )
 
-#: Global scalars exposed to the policy, in a fixed order.
+#: Global scalars exposed to the policy, in a fixed order, with the divisor that brings
+#: each into roughly [0, 1].
+#:
+#: Normalising these is not cosmetic. Raw, the vector carries tick values in the thousands
+#: and wave timers in the tens of thousands, next to item counts in the hundreds. Feeding
+#: that to a network makes the value head's output explode: measured value loss above
+#: 4,000 against a policy loss of 0.3, which drowns the policy gradient entirely and
+#: collapses entropy to zero within five updates.
 GLOBAL_FIELDS = (
-    "tick",
-    "wave",
-    "wave_time",
-    "enemies",
-    "core_health",
-    "copper",
-    "lead",
-    "coal",
-    "sand",
+    ("tick", 10_000.0),
+    ("wave", 20.0),
+    ("wave_time", 3_600.0),
+    ("enemies", 20.0),
+    ("core_health", 4_000.0),
+    ("copper", 1_000.0),
+    ("lead", 1_000.0),
+    ("coal", 1_000.0),
+    ("sand", 1_000.0),
+    ("carrying", 30.0),
+    ("unit_x", 256.0),
+    ("unit_y", 256.0),
 )
+
+#: Fields read from the unit rather than the top level of the observation.
+_UNIT_FIELDS = {"carrying": "carrying", "unit_x": "x", "unit_y": "y"}
+_TOP_LEVEL = {"tick", "wave", "wave_time", "enemies", "core_health"}
 
 
 class MindustryEnv(gym.Env):
@@ -117,7 +131,10 @@ class MindustryEnv(gym.Env):
         self._server.wait_for(rf"listening on 127\.0\.0\.1:{self.bridge_port}", timeout=90)
         self._server.command(f"bridge-speed {self.speed}", r"speed set")
 
-        self._bridge = Bridge(port=self.bridge_port, tensor=True)
+        # Generous on purpose: a step on a developed base, on a machine sharing eight
+        # servers, can take far longer than the default. Timing out kills the
+        # environment, and losing one stalls the whole run.
+        self._bridge = Bridge(port=self.bridge_port, tensor=True, timeout=300.0)
         self._bridge.connect()
         return self._bridge
 
@@ -198,12 +215,18 @@ class MindustryEnv(gym.Env):
 
     def _encode(self, obs: dict[str, Any]) -> dict[str, np.ndarray]:
         items = obs.get("items", {})
+        unit = obs.get("unit", {})
         values = []
-        for field in GLOBAL_FIELDS:
-            if field in ("tick", "wave", "wave_time", "enemies", "core_health"):
-                values.append(float(obs.get(field, 0.0)))
+
+        for field, scale in GLOBAL_FIELDS:
+            if field in _TOP_LEVEL:
+                raw = float(obs.get(field, 0.0))
+            elif field in _UNIT_FIELDS:
+                raw = float(unit.get(_UNIT_FIELDS[field], 0))
             else:
-                values.append(float(items.get(field, 0)))
+                raw = float(items.get(field, 0))
+            values.append(raw / scale)
+
         return {
             "spatial": obs["spatial"],
             "global": np.asarray(values, dtype=np.float32),
