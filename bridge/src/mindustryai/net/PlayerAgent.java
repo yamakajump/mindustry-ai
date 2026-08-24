@@ -179,18 +179,20 @@ public class PlayerAgent extends AIController {
             unit.mineTile = null;
             mining = null;
 
-            int accepted = core.acceptStack(unit.item(), unit.stack.amount, unit);
-            if (accepted <= 0) {
-                Log.warn("[mindustry-ai] core refused @ x@", unit.item(), unit.stack.amount);
-            }
+            Item carried = unit.item();
+            int amount = unit.stack.amount;
+            int accepted = carried == null ? 0 : core.acceptStack(carried, amount, unit);
+            int before = carried == null ? -1 : core.items.get(carried);
+
             if (accepted > 0) {
-                // handleStack applies the transfer; Call.transferItemTo only animates it
-                // for connected clients. Relying on the animation alone deposited nothing:
-                // the unit emptied itself 66 times and the core never gained an item.
-                core.handleStack(unit.item(), accepted, unit);
-                mindustry.gen.Call.transferItemTo(unit, unit.item(), accepted, unit.x, unit.y, core);
+                core.handleStack(carried, accepted, unit);
                 unit.clearItem();
             }
+
+            Log.info("[mindustry-ai] deposit item=@ amount=@ accepted=@ core=@->@ team=@/@",
+                carried, amount, accepted, before,
+                carried == null ? -1 : core.items.get(carried),
+                unit.team(), core.team);
             unloading = false;
         }
     }

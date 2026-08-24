@@ -48,13 +48,32 @@ On Ground Zero, through the protocol: build range 27.5 tiles; an order at 40 til
 queued with nothing placed; the unit travels; it mines 28 copper by hand; a deposit moved
 the core from 360 to 480.
 
-## Known incomplete
+## The bug that took longest, and what it was
 
-The scripted embodied baseline does not yet complete the mine-and-bank loop. The unit
-mines and empties itself, and the core stock does not rise. Direct-mode deposits work, and
-a single explicit deposit works, so the fault is in the interaction between continuous
-mining and the handover rather than in the mechanism. Recorded here rather than left as a
-surprise; the embodied baseline is not a usable reference point until it is fixed.
+The embodied baseline mined and banked for hundreds of steps while the core stock never
+moved. Two false leads first: the deposit handover, which turned out to work correctly in
+isolation (`accepted=29, core 530->559`), and the capacity threshold, which never fired
+because the engine banks slightly before the stated capacity.
+
+The actual cause was neither. The mineable mask covers *every* ore the unit can reach, and
+the policy took the nearest tile from it. Near a core that is usually sand or lead. The
+agent mined diligently, banked diligently, and the copper the task scores never moved.
+
+A useful reminder that "nothing is happening" and "the wrong thing is happening
+successfully" look identical from the outside. Instrumenting the engine settled it in one
+run, after five rounds of guessing had not.
+
+## Baseline with a body
+
+T1, 450 decisions, hand mining, three episodes each.
+
+| Policy | Mean final copper | Mean reward | Actions accepted |
+|---|---|---|---|
+| Masked random | 0 | -2.00 | 95% |
+| **Embodied Alpha** | **192** | **-0.08** | 100% |
+
+Note that acceptance rate stops being informative once there is a body: `move` is almost
+always legal, so a policy can be accepted 95% of the time while bankrupting itself.
 
 ## Alternatives rejected
 

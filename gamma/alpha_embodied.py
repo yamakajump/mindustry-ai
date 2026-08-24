@@ -50,9 +50,24 @@ class EmbodiedAlphaPolicy:
         )
 
     def _nearest_ore(self, info: dict[str, Any], unit: dict) -> tuple[int, int] | None:
+        """Nearest tile of the ore this policy is after, not of any ore at all.
+
+        The mineable mask covers every ore the unit can reach. Taking the nearest tile
+        from it sends the unit to whatever happens to be closest, which near a core is
+        usually sand or lead. It mines happily, banks happily, and the copper the task
+        actually scores never moves.
+        """
         mask = info["action_mask"].get("mineable")
         if mask is None or not mask.any():
             return None
+
+        channels = self.env._bridge.channels if self.env._bridge else []
+        if self.ore in channels:
+            wanted = info["raw"]["spatial"][channels.index(self.ore)] > 0
+            mask = mask & wanted
+        if not mask.any():
+            return None
+
         ys, xs = np.nonzero(mask)
         distance = (xs - unit["x"]) ** 2 + (ys - unit["y"]) ** 2
         best = int(np.argmin(distance))
