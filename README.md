@@ -298,6 +298,50 @@ Alpha solving two in five is the calibration working. A baseline that always won
 make the task useless as a target; one that never won would leave no evidence it is
 solvable. Full numbers and method in [`docs/measurements/baselines.md`](docs/measurements/baselines.md).
 
+## What stopped Beta, and what came of it
+
+Beta has been trained. Roughly 1.3 million steps across 406 generations, on 147 generated
+worlds, with a reward built around a ladder of first-time milestones. Scored on worlds it
+had never trained on, twelve episodes each:
+
+| policy | reward | delivered by machine | solved |
+|---|---|---|---|
+| `beta-best` | **-9.52** | 0.0 | 0/12 |
+| masked random | **-9.25** | 0.0 | 0/12 |
+
+It does not clear the random floor. That is the number this project reports, and it says
+no.
+
+The reason turned out to be structural rather than a matter of tuning, and it is worth
+stating plainly because it cost a day to find. Value in this game lives in **connected
+structures**, and every partial one is worth exactly nothing. Reading 177 archived episodes
+with [`tools/analyse_replays.py`](tools/analyse_replays.py):
+
+| | |
+|---|---|
+| drills placed | 4,481 |
+| conveyors placed | 5,719 |
+| episodes where the tiles ever met end to end, drill to core | **1** |
+
+The count is bracketed by two readings, one honouring rotations and one ignoring them
+entirely, and both give one. The arithmetic in
+[`tools/analyse_game.py`](tools/analyse_game.py) says why: a ten-tile conveyor line is one
+chance in a million **on rotations alone**, before choosing which ten of 2,304 tiles.
+Expected complete lines per episode: 0.002. A policy choosing tiles one at a time is not
+going to find that, and no amount of training time changes it.
+
+So the structures are searched for rather than learned, and that search moved into its own
+repository: **[mindustry-forge](https://github.com/yamakajump/mindustry-forge)**. It
+evolves layouts, stamps each into a running game, and keeps the ones that deliver. What it
+found from nothing but "get copper to the edge" was a vertical conveyor trunk fed by drills
+on both sides. Put back on three worlds it had never seen, it beat the hand-written
+baseline on all three while using half the blocks per unit delivered.
+
+Those designs come back here as a single action, `stamp`, alongside every primitive the
+policy already had. The guardrail for that is measured rather than argued: the same
+structure placed at random tiles delivers **zero**, against about 195 when placed where the
+ore is. The value is in the decision, which is what the policy is for, not in the structure.
+
 ## Milestones
 
 Mindustry players do not have a fixed avatar. They embody a core unit that upgrades with
@@ -307,7 +351,7 @@ because it maps cleanly onto how capable they actually are.
 | Milestone | What it is | Status |
 |---|---|---|
 | **Alpha** | A scripted baseline. It plays, badly but predictably. The yardstick everything else is measured against. | **solves T1 two times in five** |
-| **Beta** | The first agent that genuinely learns. Beats Alpha. | not started |
+| **Beta** | The first agent that genuinely learns. Beats Alpha. | **trained, does not yet clear the random floor** |
 | **Gamma** | An agent that beats competent human players. | the point of all this |
 
 The name is a double meaning worth stating once: in Mindustry, Gamma is the final form of
@@ -326,7 +370,8 @@ Ordered by dependency, not by excitement.
 - [x] **Actions.** Placing and breaking blocks, priced against the core, refused by the engine when illegal.
 - [x] **Environment.** Gymnasium-compatible: factored action space, masks for every head, reward, curriculum tasks.
 - [x] **Alpha.** The scripted baseline, and a [benchmark](docs/measurements/baselines.md) to score anything against it.
-- [ ] **Beta.** First learned agent. Clears the early curriculum stages and beats Alpha on them.
+- [ ] **Beta.** First learned agent. Clears the early curriculum stages and beats Alpha on them. Trained; [does not yet clear the random floor](docs/decisions/0014-milestones-over-potential.md).
+- [x] **Structures.** Searched for rather than learned, in [mindustry-forge](https://github.com/yamakajump/mindustry-forge), and handed back as one action. [Decision 15](docs/decisions/0015-search-for-structures-learn-where-to-put-them.md).
 - [ ] **Replays.** An event log format, and a web viewer that replays a match tile by tile.
 - [ ] **Full games.** Survival on real maps, the whole economy and defence loop.
 - [x] **Generalisation.** A new generated world every episode, drawn from 147 of them, with a fifth held back to measure on. [Decision 12](docs/decisions/0012-train-on-many-worlds.md).
