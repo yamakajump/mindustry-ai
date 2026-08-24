@@ -431,6 +431,21 @@ class TrainingMonitor:
             # the pause it was asked to leave.
             self.running.set()
 
+    def recent_mean(self, episodes: int = 30) -> float | None:
+        """Mean reward over the last `episodes` finished episodes, or None if too few.
+
+        The unit of comparison, rather than one generation's mean. An episode here spans
+        thousands of steps, so a generation closes a handful of them, and one episode that
+        automated production scores a hundred and fifty points above one that did not. A
+        single lucky episode therefore decides which generation looks best, and the
+        checkpoint that gets promoted is the lucky one.
+        """
+        with self._lock:
+            rewards = [entry["reward"] for entry in self._history[-episodes:]]
+        if len(rewards) < episodes:
+            return None
+        return round(sum(rewards) / len(rewards), 3)
+
     def register_replays(self, index: int, archive: Any) -> None:
         with self._lock:
             self._archives[index] = archive

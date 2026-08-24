@@ -369,3 +369,26 @@ def test_a_server_that_refuses_to_slow_down_does_not_take_the_run_with_it() -> N
     ]
 
     idle_speed(workers, "1")
+
+
+def test_the_best_checkpoint_is_not_decided_by_one_lucky_episode() -> None:
+    """An episode that automates production scores about +110 here and one that does not
+    about -35, and a generation closes a handful of episodes. Ranking generations on their
+    own mean therefore promotes whichever one got lucky. Measured: the checkpoint chosen
+    that way scored -9.5 on held-out worlds against -9.2 for masked random."""
+    from gamma.monitor import TrainingMonitor
+
+    monitor = TrainingMonitor()
+    monitor.match(0).policy = "beta"
+
+    # Too little to claim anything on.
+    for _ in range(10):
+        monitor.record_episode(0, -35.0, False, [])
+    assert monitor.recent_mean(episodes=30) is None
+
+    for _ in range(19):
+        monitor.record_episode(0, -35.0, False, [])
+    monitor.record_episode(0, 110.0, False, ["automation"])
+
+    # One lucky episode in thirty moves the average by five points, not by a hundred.
+    assert abs(monitor.recent_mean(episodes=30) - (-30.167)) < 0.01

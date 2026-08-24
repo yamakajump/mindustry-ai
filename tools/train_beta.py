@@ -42,6 +42,13 @@ from gamma.net import PolicyNet
 from gamma.ppo import PPO, PPOConfig, RolloutBuffer
 from gamma.window import DEFAULT_SIZE, LocalWindow
 
+#: How many finished episodes a "best so far" claim has to rest on.
+#:
+#: Thirty is not a statistical ritual; it is roughly ten generations on this task, which
+#: is enough that one lucky automated episode moves the average by a few points rather
+#: than by a hundred.
+MIN_EPISODES_FOR_BEST = 30
+
 BRIDGE_PORT_BASE = 7920
 GAME_PORT_BASE = 6920
 
@@ -405,6 +412,14 @@ def save_checkpoints(agent, monitor, generation, best_mean, args) -> float | Non
     routinely beats the average episode of a good one, so ranking on the best episode
     promotes noise. `beta-genNNNN.pt` is the trail, which is the only way to answer
     whether the agent is better than it was an hour ago by actually running both.
+
+    A generation's mean is not enough on its own either. An episode here runs for
+    thousands of steps, so a generation closes two to eight of them, and on this task one
+    that automates production scores about +110 against about -35 for one that does not.
+    A single lucky episode therefore moves the mean by a hundred points and a checkpoint
+    picked on it is a checkpoint picked on luck. Measured: `beta-best.pt` chosen that way
+    scored -9.5 on held-out worlds against -9.2 for a masked random policy. So a
+    candidate has to be built from enough episodes to mean anything.
     """
     agent.save(args.out / "beta.pt")
 
@@ -413,14 +428,15 @@ def save_checkpoints(agent, monitor, generation, best_mean, args) -> float | Non
         agent.save(args.out / name)
         monitor.annotate_generation(agent.updates, checkpoint=name)
 
-    mean = generation.get("mean_reward")
+    mean = monitor.recent_mean(episodes=MIN_EPISODES_FOR_BEST)
     if mean is None:
         return best_mean
 
     if best_mean is None or mean > best_mean:
         agent.save(args.out / "beta-best.pt")
         monitor.annotate_generation(agent.updates, best=True, checkpoint="beta-best.pt")
-        print(f"  new best generation: mean reward {mean:+.3f}", flush=True)
+        print(f"  new best: {mean:+.3f} mean over the last {MIN_EPISODES_FOR_BEST}+ episodes",
+              flush=True)
         return mean
 
     return best_mean
