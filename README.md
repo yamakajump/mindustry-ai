@@ -75,19 +75,38 @@ choice, including the alternatives that were rejected, is in
 
 Two ways, and they are not equivalent.
 
-### In the real game, with everything
+### In the game, with a remote in your hand
+
+```bash
+python tools/install_mod.py
+```
+
+Restart Mindustry and press **AI replay** in the main menu. Pick an episode and watch it
+play out with a transport bar: play and pause, 0.5x to 8x, step forward and back, scrub
+anywhere on the timeline, jump to the core. Space and the arrow keys work too. You keep
+full control of the camera the whole time, because it is your game running.
+
+Everything the engine draws is there, conveyor animations, items sliding along them,
+block connections, lighting, wave effects, because the game itself is rendering it.
+
+Rewinding is the part worth explaining: a simulation cannot be run backwards. The mod
+keeps a full snapshot of the world in memory every forty steps, in the engine's own save
+format because that is the only thing that captures items in transit, units and wave
+timers. Going back restores the nearest one and replays forward from it.
+
+The installer finds your Mindustry on its own. The Steam build keeps its data inside its
+install folder rather than in the usual application data path, which is an easy way to
+end up staring at "no mods found".
+
+### Live, over the network
 
 ```bash
 python tools/watch.py replays/showcase/alpha-t1.jsonl.gz
 ```
 
-Then open Mindustry, **Play → Join Game → 127.0.0.1:6567**, and fly around while the
-agent builds. Conveyor animations, items sliding along them, block connections, lighting,
-wave effects: all of it, because the game itself is doing the rendering.
-
-No client mod is needed. The training server already speaks Mindustry's own network
-protocol, so a stock client can simply join it. This also works live during training, not
-only for replays.
+Then **Play → Join Game → 127.0.0.1:6567**. No mod needed: the training server already
+speaks Mindustry's network protocol, so a stock client can join it. Less control than the
+mod, but this one also works **live during training**, not just on recordings.
 
 ### In a browser, for sharing
 
