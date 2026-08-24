@@ -222,6 +222,10 @@ def main() -> None:
                         help="cells writes a layout one square at a time; parts writes it "
                              "as drills and lines, so a line is one gene and is never "
                              "wrong")
+    parser.add_argument("--block-cost", type=float, default=0.05,
+                        help="what a block costs against the ore it helps deliver; too "
+                             "low and the winner sprawls, too high and the search is paid "
+                             "to build nothing")
     parser.add_argument("--item", default="copper",
                         help="the only ore that counts; pass an empty string to score "
                              "anything that arrives")
@@ -273,6 +277,7 @@ def main() -> None:
 
             kind = Population if args.genome == "cells" else DesignPopulation
             population = kind(args.width, args.height, size=args.population,
+                              block_cost=args.block_cost,
                               rng=__import__("random").Random(args.seed))
             population.seed()
 
@@ -286,7 +291,7 @@ def main() -> None:
                                  args.item or None)
 
                 best = population.best()
-                scores = [fitness(layout) for layout in population.members]
+                scores = [population.score(layout) for layout in population.members]
                 working = sum(1 for layout in population.members if (layout.delivered or 0) > 0)
                 # Reported next to the score on purpose. A generation whose score is high
                 # and whose delivery is not is a generation that found a way to be paid

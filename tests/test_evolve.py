@@ -317,3 +317,20 @@ def test_a_design_going_nowhere_still_scores_above_an_empty_one() -> None:
     empty.delivered, empty.cost, empty.stuck = 0, 0, 0
 
     assert fitness(close) > fitness(empty)
+
+
+def test_an_elite_keeps_every_field_of_its_measurement() -> None:
+    """Got wrong twice, once per field added, and it fails the same way each time: a
+    survivor scored on a different basis from the candidates around it means elitism stops
+    protecting the best and starts shuffling it out at random."""
+    from gamma.evolve import DesignPopulation
+
+    for kind in (Population, DesignPopulation):
+        population = kind(6, 6, size=6, elite=2, rng=random.Random(0))
+        population.seed()
+        for index, member in enumerate(population.members):
+            member.delivered, member.cost, member.stuck = index, index * 3, index * 7
+
+        population.advance()
+        best = population.members[0]
+        assert (best.delivered, best.cost, best.stuck) == (5, 15, 35), kind.__name__

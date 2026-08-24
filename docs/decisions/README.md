@@ -21,5 +21,6 @@ mistake is worth more than a clean history that hides it.
 | [12](0012-train-on-many-worlds.md) | Train on many worlds, and hold some back | accepted |
 | [13](0013-reward-capability-not-stock.md) | Reward capability, not stock, and shape it so it cannot lie | superseded by 14 |
 | [14](0014-milestones-over-potential.md) | Grade the agent on a ladder of firsts, not on a potential function | accepted |
+| [15](0015-search-for-structures-learn-where-to-put-them.md) | Search for the structures, learn where to put them | accepted |
 
 The overall picture these add up to is in [`../architecture.md`](../architecture.md).

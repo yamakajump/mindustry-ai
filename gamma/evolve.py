@@ -190,6 +190,16 @@ class Population:
     elite: int = 6
     tournament: int = 3
     mutation: float = 0.04
+
+    #: What a block costs against the ore it helps deliver.
+    #:
+    #: Not a detail, and not something to guess twice. At 0.05 it was set when a good
+    #: design delivered 3 ore, so it cost more than the design earned and the search was
+    #: paid to build nothing. Dropped to 0.01 it stopped mattering at all once deliveries
+    #: reached 25, and the winner sprawled from 19 blocks to 78 for four more ore, at a
+    #: third of the efficiency. It has to be read against what a delivery is currently
+    #: worth, which is why it is a knob rather than a constant.
+    block_cost: float = 0.01
     rng: random.Random = field(default_factory=random.Random)
 
     members: list[Layout] = field(default_factory=list)
@@ -200,6 +210,10 @@ class Population:
                         for _ in range(self.size)]
         return self.members
 
+    def score(self, layout) -> float:
+        """This population's own reading of fitness, so the knob actually reaches it."""
+        return fitness(layout, block_cost=self.block_cost)
+
     def _pick(self, ranked: list[Layout]) -> Layout:
         """A parent, by tournament.
 
@@ -208,19 +222,21 @@ class Population:
         uniform draw. A tournament still prefers the better of a few, whatever the scale.
         """
         contenders = self.rng.sample(ranked, min(self.tournament, len(ranked)))
-        return max(contenders, key=fitness)
+        return max(contenders, key=self.score)
 
     def advance(self) -> list[Layout]:
         """Rank what was measured, keep the best, and breed the rest."""
-        ranked = sorted(self.members, key=fitness, reverse=True)
+        ranked = sorted(self.members, key=self.score, reverse=True)
         survivors = [layout.copy() for layout in ranked[:self.elite]]
         for layout, original in zip(survivors, ranked):
-            # The elite keep their whole measurement, delivery and cost both. Copying only
-            # the delivery left every survivor billed for nothing, so a design that had
-            # been charged for seventy blocks came back as free and outranked the honest
-            # candidates behind it.
+            # The elite keep their whole measurement: delivered, cost and stuck. This has
+            # now been got wrong twice, once per field added, and it fails the same way
+            # each time. A survivor whose measurement is half copied is scored on a
+            # different basis from the candidates around it, so elitism stops protecting
+            # the best and starts shuffling it out at random.
             layout.delivered = original.delivered
             layout.cost = original.cost
+            layout.stuck = original.stuck
 
         children = []
         while len(children) + len(survivors) < self.size:
@@ -233,7 +249,7 @@ class Population:
 
     def best(self) -> Layout | None:
         measured = [layout for layout in self.members if layout.delivered is not None]
-        return max(measured, key=fitness) if measured else None
+        return max(measured, key=self.score) if measured else None
 
 # A second way of writing a layout ------------------------------------------------------
 
@@ -436,11 +452,12 @@ class DesignPopulation(Population):
         return self.members
 
     def advance(self):
-        ranked = sorted(self.members, key=fitness, reverse=True)
+        ranked = sorted(self.members, key=self.score, reverse=True)
         survivors = []
         for original in ranked[:self.elite]:
             kept = original.copy()
-            kept.delivered, kept.cost = original.delivered, original.cost
+            kept.delivered, kept.cost, kept.stuck = (
+                original.delivered, original.cost, original.stuck)
             survivors.append(kept)
 
         children = []
