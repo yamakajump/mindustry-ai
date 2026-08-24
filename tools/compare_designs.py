@@ -27,12 +27,74 @@ import numpy as np
 from gamma import tasks
 from gamma.alpha import AlphaPolicy
 from gamma.env import MindustryEnv
-from gamma.adapt import lay
+from gamma.adapt import lay, route, split
 from gamma.library import Design, from_evolution, save
 from gamma.policies import MaskedRandomPolicy
 
 BRIDGE_PORT = 7890
 GAME_PORT = 6890
+
+
+class BlindStampPolicy:
+    """Stamp the design at tiles chosen at random, never looking at the ore.
+
+    This is the guardrail for the whole approach, and it has to be run rather than argued
+    about. If a policy that picks its spots blindly does as well as one that learned where
+    to pick them, then the structure is doing all the work, the learning is decoration, and
+    what has been built is a scripted bot with a chooser bolted on.
+
+    It gets the same number of stamps and the same structure. The only thing it lacks is
+    any idea of where to put them.
+    """
+
+    def __init__(self, env, design: Design, copies: int = 3, seed: int = 0,
+                 reach: int = 24) -> None:
+        self.env = env
+        self.design = design
+        self.copies = copies
+        self.reach = reach
+        self.rng = np.random.default_rng(seed)
+        self.queue: list[dict] = []
+        self.placed = 0
+
+    def reset(self) -> None:
+        self.queue = []
+        self.placed = 0
+
+    def act(self, observation, info) -> np.ndarray:
+        raw = info.get("raw", {})
+        if not self.queue and self.placed == 0:
+            core = (int(raw.get("core_x", -1)), int(raw.get("core_y", -1)))
+            if core[0] < 0:
+                return np.zeros(5, dtype=np.int64)
+
+            cells: list[tuple[int, int, str, int]] = []
+            shape = split(self.design)
+            for _ in range(self.copies):
+                ax = int(core[0] + self.rng.integers(-self.reach, self.reach + 1))
+                ay = int(core[1] + self.rng.integers(-self.reach, self.reach + 1))
+                cells += [(ax + p.dx, ay + p.dy, p.block, p.rotation)
+                          for p in shape.producers]
+                cells += route((ax, ay), core)
+
+            cells.sort(key=lambda cell: 0 if "drill" in cell[2] else 1)
+            self.queue = [
+                {"type": "place", "block": block, "x": x, "y": y, "rotation": rotation}
+                for x, y, block, rotation in cells
+            ]
+
+        if not self.queue:
+            return np.zeros(5, dtype=np.int64)
+
+        action = self.queue.pop(0)
+        self.placed += 1
+        if action["block"] not in self.env.blocks:
+            return np.zeros(5, dtype=np.int64)
+        return np.array([
+            self.env.action_types.index("place"),
+            self.env.blocks.index(action["block"]),
+            action["x"], action["y"], action["rotation"],
+        ], dtype=np.int64)
 
 
 class StampPolicy:
@@ -174,6 +236,8 @@ def main() -> None:
             ("discovered", StampPolicy(env, design, adaptive=True)),
             ("discovered x3", StampPolicy(env, design, adaptive=True, copies=3)),
             ("discovered x6", StampPolicy(env, design, adaptive=True, copies=6)),
+            ("blind x3", BlindStampPolicy(env, design, copies=3)),
+            ("blind x6", BlindStampPolicy(env, design, copies=6)),
             ("random", MaskedRandomPolicy(env.action_space, seed=0, env=env)),
         ]
         results = {}
