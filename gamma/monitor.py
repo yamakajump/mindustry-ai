@@ -252,6 +252,15 @@ class MatchState:
     finished: int = 0
     alive: bool = True
 
+    #: Every step this match has ever taken, across episodes.
+    #:
+    #: Distinct from `step`, which is the position inside the current episode and drops
+    #: back to zero every time one ends. Summing `step` across matches and dividing by the
+    #: elapsed time is what the throughput figure used to do, and it reported 41 steps/s
+    #: for a run the trainer measured at 283: it was averaging how far into their episodes
+    #: the matches happened to be.
+    total_steps: int = 0
+
     #: What the agent has built, as [x, y, block name], so the map can use real sprites.
     built: list[Any] = field(default_factory=list)
     core: list[int] = field(default_factory=lambda: [-1, -1])
@@ -291,6 +300,7 @@ class MatchState:
             "unit": self.unit, "action": self.action,
             "refused": self.refused, "applied": self.applied,
             "episode": self.episode, "solved": self.solved,
+            "total_steps": self.total_steps,
             "finished": self.finished, "alive": self.alive,
             "built": self.built, "core": self.core, "size": self.size,
             "terrain_version": self.terrain_version,
@@ -413,7 +423,7 @@ class TrainingMonitor:
         episodes = sum(m["finished"] for m in matches)
         solved = sum(m["solved"] for m in matches)
         elapsed = max(1e-6, time.time() - self.started)
-        steps = sum(m["step"] for m in matches)
+        steps = sum(m["total_steps"] for m in matches)
 
         leaderboard = sorted(
             ({"policy": m["policy"], "match": m["index"],

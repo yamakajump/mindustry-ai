@@ -228,3 +228,18 @@ def test_the_dashboard_names_every_rung_in_both_languages() -> None:
     )
     for stone in tasks.MILESTONES:
         assert page.count(f"rung_{stone.name}:") == 2, stone.name
+
+
+def test_throughput_counts_steps_taken_not_steps_into_an_episode() -> None:
+    """The figure on screen used to be the average distance into an episode, which fell
+    back to zero every time one ended. It read 41 steps/s for a run doing 283."""
+    from gamma.monitor import TrainingMonitor
+
+    monitor = TrainingMonitor()
+    first, second = monitor.match(0), monitor.match(1)
+    first.total_steps, second.total_steps = 4000, 6000
+    # Both have just reset, so their position inside the current episode is nearly zero.
+    first.step, second.step = 3, 1
+
+    assert monitor.snapshot()["totals"]["steps_per_second"] > 0
+    assert first.as_dict()["total_steps"] == 4000

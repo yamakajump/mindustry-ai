@@ -244,6 +244,7 @@ class EnvWorker:
 
                 raw = info["raw"]
                 state.step = episode_steps
+                state.total_steps += 1
                 state.tick = float(raw.get("tick", 0))
                 state.wave = int(raw.get("wave", 0))
                 state.reward = episode_reward
