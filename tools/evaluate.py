@@ -25,7 +25,6 @@ import numpy as np
 import torch
 
 from gamma import tasks
-from gamma.cleanup import kill_servers
 from gamma.env import MindustryEnv
 from gamma.net import PolicyNet
 from gamma.ppo import PPOConfig
@@ -144,7 +143,9 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=Path("docs/measurements/generalisation.json"))
     args = parser.parse_args()
 
-    kill_servers()
+    # Deliberately no server cleanup: this runs on its own ports and its own directory,
+    # and is meant to be usable while a training run is going. Killing every Mindustry
+    # process would take the run down with it.
     jar = str(next((Path("bridge") / "build" / "libs").glob("*.jar")))
     task = tasks.get(args.task)
 
