@@ -18,5 +18,7 @@ mistake is worth more than a clean history that hides it.
 | [9](0009-normalised-inputs.md) | Normalised inputs, and the entropy collapse they caused | accepted |
 | [10](0010-live-scene-stream.md) | A scene stream, so training can be watched rather than inferred | accepted |
 | [11](0011-render-like-the-engine.md) | Reproduce the engine rendering, do not approximate it | accepted |
+| [12](0012-train-on-many-worlds.md) | Train on many worlds, and hold some back | accepted |
+| [13](0013-reward-capability-not-stock.md) | Reward capability, not stock, and shape it so it cannot lie | accepted |
 
 The overall picture these add up to is in [`../architecture.md`](../architecture.md).

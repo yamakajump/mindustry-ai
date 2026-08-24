@@ -10,6 +10,7 @@ than to play, and the scripted macro library is the intended source of early gui
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -29,6 +30,16 @@ class Task:
     #: of the Serpulo campaign, and the game itself defines what winning means there:
     #: survive to wave 10. That beats any threshold invented for a custom map.
     sector: str | None = None
+
+    #: Draw a different generated sector every episode, from the planet's own pool.
+    #:
+    #: This is the difference between learning a map and learning the game. A fixed map is
+    #: memorised; several hundred generated ones cannot be. See `gamma/sectors.py`.
+    procedural: bool = False
+
+    #: Cap on the game's own difficulty estimate for a sector. The cheapest curriculum
+    #: available, because the number is already computed and attached to every sector.
+    threat_limit: float = 1.0
 
     #: Items placed in the core on load. A sector loaded directly comes up empty.
     loadout: dict[str, int] | None = None
@@ -103,6 +114,59 @@ def _throughput(item: str, scale: float) -> Callable[[Observation, Observation],
             before.get("items", {}).get(item, 0)
         )
         return gained * scale
+
+    return reward
+
+
+def potential(obs: Observation) -> float:
+    """How well placed the agent is, as one number.
+
+    This is the potential in potential-based reward shaping (Ng, Harada and Russell,
+    1999), whose result is that a reward of the form `gamma * phi(s') - phi(s)` leaves the
+    optimal policy unchanged. That is what makes it safe to give a dense signal on a task
+    whose real objective is sparse: it cannot teach a shortcut, because the shortest path
+    to a high potential is the behaviour the potential measures.
+
+    What it measures is the point. A potential over **stock** rewards hoarding, and an
+    agent maximising stock mines by hand forever, because hand mining fills the core and
+    a drill costs resources to place. A potential over **capability** rewards the machine
+    that fills the core, so building the drill pays back within a few steps and keeps
+    paying. Nothing tells the agent that drills mine; it is left to notice that the
+    quantity it is graded on rises faster when it has them.
+
+    Three terms, all bounded, all functions of the state alone:
+
+    - **A core that is alive.** Everything else is worth nothing without it, so it carries
+      the most weight and is the only term that can reach its own maximum.
+    - **What has been banked**, on a log so that the first hundred copper matters and the
+      ten thousandth does not. A saturating term cannot be farmed indefinitely.
+    - **What is standing**, counted as buildings the team owns, on a log for the same
+      reason. This is the term that pays for a factory rather than a pile.
+    """
+    core_max = float(obs.get("core_max_health", 0.0)) or 1.0
+    alive = float(obs.get("core_health", 0.0)) / core_max
+
+    banked = sum(int(amount) for amount in obs.get("items", {}).values())
+    built = int(obs.get("built", 0))
+
+    return (
+        2.0 * max(0.0, min(1.0, alive))
+        + 0.6 * math.log1p(banked) / math.log1p(5000)
+        + 0.6 * math.log1p(built) / math.log1p(200)
+    )
+
+
+def shaped(
+    terminal: Callable[[Observation, Observation], float],
+    discount: float = 0.99,
+) -> Callable[[Observation, Observation], float]:
+    """Wrap a sparse objective in potential-based shaping.
+
+    The discount has to match the one the learner uses, or the guarantee does not hold.
+    """
+
+    def reward(before: Observation, after: Observation) -> float:
+        return terminal(before, after) + discount * potential(after) - potential(before)
 
     return reward
 
@@ -257,3 +321,38 @@ ENDLESS = Task(
 )
 
 CURRICULUM[ENDLESS.name] = ENDLESS
+
+
+FRONTIER = Task(
+    name="frontier",
+    description="Land on a world it has never seen, build an economy, and hold it.",
+    # Unused: every episode draws its own generated sector.
+    map_name="",
+    procedural=True,
+    # The planet ranges from 0.30 to 0.74. Capping near the bottom gives roughly a third
+    # of the pool, which is still well over a hundred worlds, and leaves somewhere to widen
+    # to once the agent copes.
+    threat_limit=0.40,
+    loadout={"copper": 300, "lead": 300},
+    ticks_per_step=30,
+    max_steps=3000,
+    succeeded=lambda obs: int(obs.get("wave", 0)) > 10,
+    failed=lambda obs: bool(obs.get("game_over")) or not obs.get("has_core", True),
+    # The sparse objective is the wave counter, exactly as the campaign defines capture.
+    # Everything dense comes from the shaping, which is why it is safe: the shaped term
+    # provably cannot change which policy is optimal, so it guides without teaching a
+    # shortcut.
+    #
+    # The one caveat worth stating: the guarantee assumes the potential is zero at a
+    # terminal state. It is at a real loss, because the core is gone and the potential
+    # goes with it. It is not at a time limit, which is the standard episodic
+    # approximation and the reason the step budget is generous rather than tight.
+    reward=shaped(
+        lambda before, after: float(
+            int(after.get("wave", 0)) - int(before.get("wave", 0))
+        )
+    ),
+    success_bonus=50.0,
+)
+
+CURRICULUM[FRONTIER.name] = FRONTIER

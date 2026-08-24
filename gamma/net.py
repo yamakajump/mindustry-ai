@@ -74,32 +74,75 @@ class PolicyNet(nn.Module):
             layer_init(nn.Conv2d(channels, 32, 5, stride=2, padding=2)), nn.ReLU(),
             layer_init(nn.Conv2d(32, 64, 3, stride=2, padding=1)), nn.ReLU(),
             layer_init(nn.Conv2d(64, 64, 3, stride=2, padding=1)), nn.ReLU(),
-            nn.Flatten(),
         )
-        spatial_features = 64 * (window // 8) * (window // 8)
 
         self.globals = nn.Sequential(
             layer_init(nn.Linear(globals_size, 64)), nn.ReLU(),
         )
+        # Pooled rather than flattened. A flattened trunk ties every weight to an absolute
+        # offset in the window, so the same feature at a different place is a different
+        # input; pooling asks what is around instead of where it is, which is the right
+        # question for choosing what to do.
         self.body = nn.Sequential(
-            layer_init(nn.Linear(spatial_features + 64, hidden)), nn.ReLU(),
+            layer_init(nn.Linear(64 + 64, hidden)), nn.ReLU(),
         )
 
         # Small initial weights on the action heads keep the first policy close to
         # uniform, which stops early training from committing to one action type.
         self.head_type = layer_init(nn.Linear(hidden, n_types), std=0.01)
         self.head_block = layer_init(nn.Linear(hidden, n_blocks), std=0.01)
-        self.head_position = layer_init(nn.Linear(hidden, window * window), std=0.01)
         self.head_rotation = layer_init(nn.Linear(hidden, n_rotations), std=0.01)
         # Small init here too: a value head starting on large outputs produces a huge
         # first loss, and the update that corrects it wipes out the policy with it.
         self.head_value = layer_init(nn.Linear(hidden, 1), std=0.1)
 
-    def features(self, spatial: torch.Tensor, globals_: torch.Tensor) -> torch.Tensor:
+        # The position head, fully convolutional.
+        #
+        # It used to be a dense layer over a flattened trunk, which means the network
+        # learns "the tile at index 1477 is worth building on" rather than "a tile that
+        # looks like this is worth building on". On one map those are the same statement.
+        # On a new one only the second transfers, and the whole point of training across
+        # hundreds of generated worlds is that the second is what gets learned.
+        #
+        # A convolution is equivariant to translation by construction: shift the window
+        # and the logits shift with it. This is the same shape as the spatial action head
+        # in AlphaStar and in Gym-uRTS, and it is standard for a reason.
+        self.context = layer_init(nn.Linear(hidden, 32))
+        self.decoder = nn.Sequential(
+            layer_init(nn.Conv2d(64 + 32, 64, 3, padding=1)), nn.ReLU(),
+            nn.Upsample(scale_factor=2, mode="nearest"),
+            layer_init(nn.Conv2d(64, 32, 3, padding=1)), nn.ReLU(),
+            nn.Upsample(scale_factor=2, mode="nearest"),
+            layer_init(nn.Conv2d(32, 32, 3, padding=1)), nn.ReLU(),
+            nn.Upsample(scale_factor=2, mode="nearest"),
+            layer_init(nn.Conv2d(32, 16, 3, padding=1)), nn.ReLU(),
+            layer_init(nn.Conv2d(16, 1, 1), std=0.01),
+        )
+
+    def trunk_map(self, spatial: torch.Tensor) -> torch.Tensor:
+        """The convolutional feature map, before anything collapses it."""
         # uint8 to float here rather than in the environment: it keeps the replay buffer
         # four times smaller, which matters far more than the cast.
-        spatial = spatial.float() / 255.0
-        return self.body(torch.cat([self.trunk(spatial), self.globals(globals_)], dim=1))
+        return self.trunk(spatial.float() / 255.0)
+
+    def features(self, spatial: torch.Tensor, globals_: torch.Tensor) -> torch.Tensor:
+        return self.body_of(self.trunk_map(spatial), globals_)
+
+    def body_of(self, spatial_map: torch.Tensor, globals_: torch.Tensor) -> torch.Tensor:
+        pooled = spatial_map.mean(dim=(2, 3))
+        return self.body(torch.cat([pooled, self.globals(globals_)], dim=1))
+
+    def positions(self, spatial_map: torch.Tensor, features: torch.Tensor) -> torch.Tensor:
+        """One logit per tile of the window.
+
+        The pooled context is broadcast back across the map before decoding, so the choice
+        of tile can depend on what the agent is carrying and what it can afford, and not
+        only on what the tile looks like.
+        """
+        context = self.context(features)[:, :, None, None]
+        context = context.expand(-1, -1, spatial_map.shape[2], spatial_map.shape[3])
+        logits = self.decoder(torch.cat([spatial_map, context], dim=1))
+        return logits.flatten(1)
 
     def value(self, spatial: torch.Tensor, globals_: torch.Tensor) -> torch.Tensor:
         return self.head_value(self.features(spatial, globals_)).squeeze(-1)
@@ -117,12 +160,13 @@ class PolicyNet(nn.Module):
         Components are summed because one environment action is all four choices together:
         the probability of the action is the product of the parts.
         """
-        features = self.features(spatial, globals_)
+        spatial_map = self.trunk_map(spatial)
+        features = self.body_of(spatial_map, globals_)
 
         heads = [
             MaskedCategorical(self.head_type(features), masks.get("type")),
             MaskedCategorical(self.head_block(features), masks.get("block")),
-            MaskedCategorical(self.head_position(features), masks.get("position")),
+            MaskedCategorical(self.positions(spatial_map, features), masks.get("position")),
             MaskedCategorical(self.head_rotation(features), masks.get("rotation")),
         ]
 

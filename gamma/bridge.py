@@ -217,12 +217,29 @@ class Bridge:
         """
         return self.request({"cmd": "map"})
 
-    def sector(self, name: str = "groundZero", loadout: dict[str, int] | None = None):
-        """Load a campaign sector, such as Ground Zero, the first of the Serpulo campaign."""
-        message: dict[str, Any] = {"cmd": "sector", "name": name}
+    def sector(
+        self,
+        name: str | None = "groundZero",
+        loadout: dict[str, int] | None = None,
+        index: int | None = None,
+    ):
+        """Load a campaign sector, by name for a preset or by index for a generated one.
+
+        An index draws from the several hundred procedural sectors on Serpulo. A name
+        picks one of the dozen hand-made presets, Ground Zero among them.
+        """
+        message: dict[str, Any] = {"cmd": "sector"}
+        if index is not None:
+            message["index"] = int(index)
+        else:
+            message["name"] = name
         if loadout is not None:
             message["loadout"] = loadout
         return self.request(message)
+
+    def sectors(self) -> dict[str, Any]:
+        """Every procedural sector on Serpulo, with the threat the game assigned it."""
+        return self.request({"cmd": "sectors"})
 
     def embody(self) -> dict[str, Any]:
         """Give the agent a unit, so it plays under a player's limits.

@@ -12,6 +12,7 @@ so any algorithm can use it without the environment silently rewriting what was 
 
 from __future__ import annotations
 
+import random
 from typing import Any
 
 import gymnasium as gym
@@ -19,6 +20,7 @@ import numpy as np
 from gymnasium import spaces
 
 from gamma.bridge import Bridge
+from gamma.sectors import SectorPool, build_pool
 from gamma.server import ServerProcess, install_plugin
 from gamma.server_setup import setup_server
 from gamma.tasks import Task
@@ -89,9 +91,15 @@ class MindustryEnv(gym.Env):
         jar: str | None = None,
         speed: str = "max",
         embodied: bool = False,
+        evaluating: bool = False,
+        seed: int | None = None,
     ) -> None:
         super().__init__()
         self.task = task
+        # Drawing from the held-out half of the sector pool. Set only by the evaluator:
+        # a training run that touched these would make its own score meaningless.
+        self.evaluating = evaluating
+        self.sector_index: int | None = None
         self.blocks = blocks
         # An embodied agent plays as a player: it must travel to what it builds and mine
         # by hand. Slower to train, and the only setting that matches the real game.
@@ -106,6 +114,11 @@ class MindustryEnv(gym.Env):
 
         self._server: ServerProcess | None = None
         self._bridge: Bridge | None = None
+        self._pool: SectorPool | None = None
+        # Seeded per environment, so six of them running in parallel do not all draw the
+        # same sector on the same episode and turn a pool of two hundred into a pool of
+        # one.
+        self._rng = random.Random(seed if seed is not None else bridge_port)
         self._steps = 0
         self._last_obs: dict[str, Any] = {}
 
@@ -179,14 +192,28 @@ class MindustryEnv(gym.Env):
             self._last_obs = raw
 
     def _load(self, bridge: Bridge) -> dict[str, Any]:
-        """Start a match, from a campaign sector or a custom map."""
-        if self.task.sector is not None:
+        """Start a match: a generated sector, a named preset, or a custom map."""
+        if self.task.procedural:
+            raw = bridge.sector(index=self._next_sector(bridge), loadout=self.task.loadout)
+        elif self.task.sector is not None:
             raw = bridge.sector(self.task.sector, self.task.loadout)
         else:
             raw = bridge.reset(self.task.map_name, self.task.mode)
         if self.embodied:
             raw = bridge.embody()
         return raw
+
+    def _next_sector(self, bridge: Bridge) -> int:
+        """The world for this episode, drawn from the pool the task asked for.
+
+        The listing is fetched once per environment: it describes the planet, which does
+        not change, and asking for it on every episode would cost a round trip for an
+        answer that is already known.
+        """
+        if self._pool is None:
+            self._pool = build_pool(bridge.sectors(), threat_limit=self.task.threat_limit)
+        self.sector_index = self._pool.pick(self._rng, evaluating=self.evaluating)
+        return self.sector_index
 
     def _build_spaces(self, obs: dict[str, Any]) -> None:
         spatial = obs["spatial"]
@@ -207,23 +234,18 @@ class MindustryEnv(gym.Env):
             [len(self.action_types), len(self.blocks), width, height, 4]
         )
 
-    def _check_shape(self, obs: dict[str, Any]) -> None:
-        """Refuse an episode on a map that is not the size the spaces were built for.
+    def _resize(self, obs: dict[str, Any]) -> None:
+        """Follow the map when it changes size between episodes.
 
-        The action space carries the map dimensions, so a different size makes every
-        position the agent picks meaningless, and the failure surfaces somewhere else
-        entirely: the first time this happened it came out of the replay recorder as a
-        broadcast error between two arrays, which says nothing about a map having changed
-        underneath the run.
+        Generated sectors are not all the same size, so this is expected rather than
+        exceptional. It stays worth noticing because the spaces carry the dimensions: a
+        caller reading `action_space` and caching it would then be addressing a map that
+        no longer exists. Wrapped in a local window, which is how the policy sees the
+        world, none of this reaches the network.
         """
         expected = self._observation_space["spatial"].shape[1:]
-        actual = obs["spatial"].shape[1:]
-        if actual != expected:
-            raise RuntimeError(
-                f"the map changed size between episodes: expected {expected[1]}x{expected[0]}, "
-                f"loaded {actual[1]}x{actual[0]}. Task {self.task.name!r} asked for "
-                f"{'sector ' + self.task.sector if self.task.sector else 'map ' + self.task.map_name!r}."
-            )
+        if obs["spatial"].shape[1:] != expected:
+            self._build_spaces(obs)
 
     @property
     def action_types(self) -> tuple[str, ...]:
@@ -354,7 +376,7 @@ class MindustryEnv(gym.Env):
         if self._observation_space is None:
             self._build_spaces(raw)
         else:
-            self._check_shape(raw)
+            self._resize(raw)
 
         self._steps = 0
         self._last_obs = raw
