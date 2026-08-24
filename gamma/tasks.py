@@ -168,6 +168,48 @@ def get(name: str) -> Task:
     return CURRICULUM[name]
 
 
+def _survive_and_defend() -> Callable[[Observation, Observation], float]:
+    """Waves survived, minus the damage the core takes, plus a little for banking.
+
+    The wave counter alone is what the sector calls progress, and it is also entirely
+    outside the agent's control: waves arrive on a timer whether it built a turret or sat
+    still. Every episode therefore scored exactly the same and there was nothing to learn
+    from. Measured over twenty-six generations of a real run: mean reward 1.000, unchanged
+    from the first to the last, with entropy still at 11.6 because the policy had no
+    reason to move off random.
+
+    Core damage is the term that closes the loop. It is the one number that answers "did
+    the defence hold", it cannot be farmed because a core does not heal, and it stays at
+    zero for an agent that keeps the enemy away, which is exactly the behaviour the sector
+    asks for.
+
+    Banking is worth a fraction of a wave. Without it the first thousand steps carry no
+    gradient at all, because nothing happens until the first wave lands, and an agent with
+    an empty core cannot build a defence even once it wants to.
+
+    The wave term is kept even though it is nearly constant per unit of time, because it
+    is not constant per episode: dying early forfeits every wave that would have followed,
+    which is what makes survival worth something.
+    """
+
+    def reward(before: Observation, after: Observation) -> float:
+        waves = int(after.get("wave", 0)) - int(before.get("wave", 0))
+
+        # A full core-shard is 1100 health, so losing it outright costs a little over
+        # three waves. Enough to outweigh the waves it would have collected by standing
+        # still and letting the enemy through.
+        damage = float(before.get("core_health", 0.0)) - float(after.get("core_health", 0.0))
+
+        banked = sum(
+            int(after.get("items", {}).get(item, 0)) - int(before.get("items", {}).get(item, 0))
+            for item in ("copper", "lead")
+        )
+
+        return waves + max(0.0, damage) * -0.003 + banked * 0.002
+
+    return reward
+
+
 GROUND_ZERO = Task(
     name="GZ_capture",
     description="Capture Ground Zero: survive to wave 10, as the campaign defines it.",
@@ -179,9 +221,7 @@ GROUND_ZERO = Task(
     ticks_per_step=30,
     max_steps=4000,
     succeeded=lambda obs: int(obs.get("wave", 0)) > 10,
-    reward=lambda before, after: float(
-        int(after.get("wave", 0)) - int(before.get("wave", 0))
-    ),
+    reward=_survive_and_defend(),
     success_bonus=50.0,
 )
 
