@@ -64,7 +64,10 @@ def find_data_dir(override: Path | None) -> Path:
 
 
 def build() -> Path:
-    gradlew = MOD_DIR / ("gradlew.bat" if os.name == "nt" else "gradlew")
+    # Absolute, because Windows resolves a relative program name against the parent's
+    # working directory and not the child's, so the relative path plus `cwd` here failed
+    # with a bare exit code and nothing to read.
+    gradlew = (MOD_DIR / ("gradlew.bat" if os.name == "nt" else "gradlew")).resolve()
     subprocess.run([str(gradlew), "jar", "--no-daemon", "-q"], cwd=MOD_DIR, check=True)
     if not MOD_JAR.exists():
         raise SystemExit(f"gradle produced no jar at {MOD_JAR}")

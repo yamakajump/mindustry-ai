@@ -97,12 +97,25 @@ def test_a_built_chain_delivers_ore_to_the_core(acting) -> None:
     copper = obs["spatial"][client.channels.index("ore_copper")]
     ys, xs = np.where(copper > 0)
     assert len(xs) > 0, "no copper on this map"
-    nearest = int(np.argmin((xs - core_x) ** 2 + (ys - core_y) ** 2))
-    ore_x, ore_y = int(xs[nearest]), int(ys[nearest])
 
-    assert client.act(
-        {"type": "place", "block": "mechanical-drill", "x": ore_x, "y": ore_y}
-    )["action"]["applied"]
+    # Closest first, but not the closest only. A mechanical drill covers two tiles by two,
+    # so the nearest ore tile is regularly one whose footprint runs into a wall or another
+    # ore body, and the engine refuses it. Insisting on that one tile made this test fail
+    # on a map it had no quarrel with.
+    order = np.argsort((xs - core_x) ** 2 + (ys - core_y) ** 2)
+    refusals = []
+    ore_x = ore_y = None
+    for candidate in order[:40]:
+        x, y = int(xs[candidate]), int(ys[candidate])
+        outcome = client.act(
+            {"type": "place", "block": "mechanical-drill", "x": x, "y": y}
+        )["action"]
+        if outcome["applied"]:
+            ore_x, ore_y = x, y
+            break
+        refusals.append(f"({x},{y}) {outcome.get('reason', 'no reason')}")
+
+    assert ore_x is not None, "no copper tile took a drill: " + "; ".join(refusals[:5])
 
     # Build the path first, then orient each conveyor towards the next tile on it.
     # Deriving rotation from the segment instead would leave the corner tile pointing

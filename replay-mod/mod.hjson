@@ -5,4 +5,7 @@ main: mindustryai.replay.ReplayMod
 description: "Watch mindustry-ai agents play, with pause, rewind and speed control."
 version: "0.1.0"
 minGameVersion: 154
-hidden: false
+# Client-side only: it reads recorded files and adds a menu button, and touches nothing
+# the server simulates. Listed as visible, it lands in the multiplayer mod comparison and
+# a player carrying it is refused from a training server with "incompatible mods".
+hidden: true

@@ -106,6 +106,13 @@
     color: var(--good); border-radius: 7px; padding: 6px 9px; font-size: 12px; display: none;
   }
   .join.on { display: flex; align-items: center; gap: 6px; }
+  .join button {
+    margin-left: auto; background: rgba(121,221,154,.16); border: 1px solid rgba(121,221,154,.4);
+    color: var(--good); border-radius: 5px; padding: 2px 8px; font-size: 11px;
+  }
+  .join button:hover { background: rgba(121,221,154,.28); }
+  /* Reserved on every card, so the one match you can join is not the odd size out. */
+  .join:not(.on) { display: block; visibility: hidden; }
   .join b { color: var(--text); font-family: ui-monospace, monospace; }
   .items { display: flex; flex-wrap: wrap; gap: var(--s1); }
   .item { background: var(--raised); border: 1px solid var(--line); border-radius: 5px; padding: 1px 7px; font-size: 12px; }
@@ -300,7 +307,7 @@ const STRINGS = {
     lede:"Every panel below is one match being played right now. The agent flies, mines, builds and defends under the same rules a player has. It gets a little better every <b>generation</b>, and each generation worth keeping is saved as a version you can replay.",
     curveHint:"Reward per generation. Rising means the agent is learning; exploration falling to zero means it stopped trying new things.",
     versionHint:"Best is chosen on the average across a generation, not on one lucky episode.",
-    gen:"gen", mean:"mean", episodesShort:"eps", waves:"waves",
+    gen:"gen", mean:"mean", episodesShort:"eps", waves:"waves", copy:"copy", copied:"copied!",
     follow:"follow the bot", cameraHint:"drag to move, wheel to zoom, F to follow",
     needGenerations:"first episodes still running...",
   },
@@ -323,7 +330,7 @@ const STRINGS = {
     lede:"Chaque panneau ci-dessous est une partie jouée en ce moment. L'agent vole, mine, construit et se défend avec les mêmes règles qu'un joueur. Il s'améliore un peu à chaque <b>génération</b>, et chaque génération qui vaut le coup est sauvegardée en version rejouable.",
     curveHint:"Récompense par génération. Ça monte, il apprend. L'exploration qui tombe à zéro veut dire qu'il n'essaie plus rien de neuf.",
     versionHint:"La meilleure est choisie sur la moyenne d'une génération, pas sur un épisode chanceux.",
-    gen:"gén", mean:"moy", episodesShort:"éps", waves:"vagues",
+    gen:"gén", mean:"moy", episodesShort:"éps", waves:"vagues", copy:"copier", copied:"copié !",
     follow:"suivre le bot", cameraHint:"glisser pour déplacer, molette pour zoomer, F pour suivre",
     needGenerations:"premiers épisodes en cours...",
   },
@@ -380,11 +387,17 @@ function imageOf(stem) {
 
   images.set(stem, null);
   const image = new Image();
-  image.onload = () => images.set(stem, image);
+  // The ground is painted into a cached canvas, so a sprite that arrives after that paint
+  // would never appear. Bumping the epoch invalidates every cached layer, which costs one
+  // repaint per sprite on the first seconds of a run and nothing after.
+  image.onload = () => { images.set(stem, image); spriteEpoch++; };
   image.onerror = () => images.set(stem, false);
   image.src = `assets/sprites/${encodeURIComponent(stem)}.png`;
   return null;
 }
+
+/** Bumped whenever a sprite finishes loading, so cached paintings know they are stale. */
+let spriteEpoch = 0;
 
 /** The sprite group behind a name: its size in tiles, its variants, its sheet grid. */
 const spriteOf = name => (spriteIndex && name) ? (spriteIndex[name] || null) : null;
@@ -774,7 +787,7 @@ function tintedImage(key, image, colour) {
   // which is why the core looked like a grey box with nothing on it.
   ctx.globalCompositeOperation = "multiply";
   ctx.fillStyle = colour;
-  ctx.fillRect(0, 0, s.w, s.h);
+  ctx.fillRect(0, 0, image.width, image.height);
   // Multiply leaves the transparent margin coloured, so the sprite is stamped back over
   // it as a mask.
   ctx.globalCompositeOperation = "destination-in";
@@ -834,6 +847,42 @@ function computeDarkness(terrain) {
   return dark;
 }
 
+/**
+ * The part of the map worth looking at: everything not buried in rock.
+ *
+ * A campaign sector is a pocket inside a solid mass, and that mass is what the darkness
+ * pass paints black. Taking the bounding box of what stays lit gives the played area
+ * without the engine having to say where it is, and stops a card spending nine tenths of
+ * itself on rock nobody will ever walk on.
+ */
+function playableBounds(terrain) {
+  if (terrain.bounds) return terrain.bounds;
+  if (!terrain.darkness) terrain.darkness = computeDarkness(terrain);
+
+  const { width: w, height: h } = terrain;
+  let minX = w, minY = h, maxX = -1, maxY = -1;
+  for (let i = 0; i < w * h; i++) {
+    if (terrain.darkness[i] >= 4) continue;
+    const x = i % w, y = (i / w) | 0;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+
+  const margin = 3;
+  // A map with no rock around it, or one still arriving, falls back to all of it.
+  terrain.bounds = maxX < 0
+    ? { x: w / 2, y: h / 2, width: w, height: h }
+    : {
+        x: (minX + maxX) / 2,
+        y: (minY + maxY) / 2,
+        width: maxX - minX + 1 + margin * 2,
+        height: maxY - minY + 1 + margin * 2,
+      };
+  return terrain.bounds;
+}
+
 /** The grey a tile is multiplied by for its darkness value, straight from the engine. */
 const darknessLevel = value => value > 0 ? 1 - Math.min((value + 0.5) / 4, 1) : 1;
 
@@ -859,43 +908,52 @@ function maskCanvas(terrain, field, w, h) {
  */
 function shadowMask(terrain, world) {
   const { width: w, height: h } = terrain;
-  const key = `${terrain.version}:${world.built}:${world.erasedCount}`;
+  const grey = `rgb(${Math.round(SHADOW_LEVEL * 255)},${Math.round(SHADOW_LEVEL * 255)},${Math.round(SHADOW_LEVEL * 255)})`;
+
+  // The terrain half is a per-pixel pass over the whole map, so it is done once and only
+  // redone when a map block is destroyed. Rebuilding it every time the agent laid a
+  // conveyor cost a quarter-second stall, six times over.
+  const baseKey = `${terrain.version}:${world.erasedCount}`;
+  if (terrain.shadowBaseKey !== baseKey) {
+    const base = maskCanvas(terrain, "shadowBase", w, h);
+    const baseCtx = base.getContext("2d", { willReadFrequently: true });
+    const image = baseCtx.createImageData(w, h);
+    const data = image.data;
+    const level = Math.round(SHADOW_LEVEL * 255);
+
+    for (let i = 0; i < w * h; i++) {
+      const entry = terrain.palette[String(terrain.block[i])];
+      const casts = entry && entry.shadow && !world.erased.has(i);
+      // Row zero of the mask is the top of the screen, so the world is flipped into it.
+      const p = ((h - 1 - ((i / w) | 0)) * w + (i % w)) * 4;
+      data[p] = data[p + 1] = data[p + 2] = casts ? level : 255;
+      data[p + 3] = 255;
+    }
+    baseCtx.putImageData(image, 0, 0);
+    terrain.shadowBaseKey = baseKey;
+  }
+
+  const key = `${baseKey}:${world.built}`;
   if (terrain.shadowKey === key && terrain.shadow) return terrain.shadow;
 
+  // Buildings are stamped onto a copy, which is a blit and a handful of one-pixel rects
+  // rather than another pass over sixty-five thousand tiles.
   const canvas = maskCanvas(terrain, "shadow", w, h);
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  const image = ctx.createImageData(w, h);
-  const data = image.data;
-  const grey = Math.round(SHADOW_LEVEL * 255);
-
-  // Row zero of the mask is the top of the screen, so the world is flipped into it.
-  const put = (x, y, value) => {
-    const p = ((h - 1 - y) * w + x) * 4;
-    data[p] = data[p + 1] = data[p + 2] = value;
-    data[p + 3] = 255;
-  };
-
-  for (let i = 0; i < w * h; i++) {
-    const entry = terrain.palette[String(terrain.block[i])];
-    const casts = entry && entry.shadow && !world.erased.has(i);
-    put(i % w, (i / w) | 0, casts ? grey : 255);
-  }
+  const ctx = canvas.getContext("2d");
+  ctx.globalCompositeOperation = "copy";
+  ctx.drawImage(terrain.shadowBase, 0, 0);
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = grey;
 
   for (const [tile, b] of world.buildings) {
     const info = world.blocks[String(b.block)];
     if (info && info.shadow === false) continue;
     const size = info ? (info.size || 1) : 1;
     const offset = Math.floor((size - 1) / 2);
-    const bx = (tile % w) - offset, by = ((tile / w) | 0) - offset;
-    for (let dy = 0; dy < size; dy++) {
-      for (let dx = 0; dx < size; dx++) {
-        const x = bx + dx, y = by + dy;
-        if (x >= 0 && y >= 0 && x < w && y < h) put(x, y, grey);
-      }
-    }
+    const bx = (tile % w) - offset, by = ((tile / w) | 0) - offset + size - 1;
+    ctx.fillRect(bx, h - 1 - by, size, size);
   }
 
-  ctx.putImageData(image, 0, 0);
   terrain.shadowKey = key;
   return canvas;
 }
@@ -938,7 +996,7 @@ function darkMask(terrain) {
  */
 function terrainLayer(terrain, world, ox, oy, cols, rows, cell, walls) {
   const slot = walls ? "wallLayer" : "floorLayer";
-  const key = `${terrain.version}:${ox}:${oy}:${cols}:${rows}:${cell}:${world.erasedCount}`;
+  const key = `${terrain.version}:${ox}:${oy}:${cols}:${rows}:${cell}:${world.erasedCount}:${spriteEpoch}`;
   if (terrain[slot + "Key"] === key && terrain[slot]) return terrain[slot];
 
   const pxW = Math.ceil(cols * cell), pxH = Math.ceil(rows * cell);
@@ -1140,7 +1198,13 @@ function drawMatch(canvas, match, terrain, world, zoom, now) {
   // The requested span is fitted on the short axis; the long one simply shows more of
   // the map. Fitting a square viewport into a canvas that is not square is what leaves a
   // black band down one side.
-  const span = zoom ? Math.min(camera.span, Math.max(mapW, mapH)) : Math.max(mapW, mapH);
+  // Framed on the part of the map that is actually played. A campaign sector is a small
+  // pocket carved out of a solid rock mass, so showing all two hundred and fifty-six tiles
+  // spends nine tenths of a card on black.
+  const played = playableBounds(terrain);
+  const span = zoom
+    ? Math.min(camera.span, Math.max(mapW, mapH))
+    : Math.max(played.width, played.height);
   // Snapped to whole device pixels when zoomed in. A fractional cell makes every tile
   // sample its 32-pixel sprite at a different offset, and the interference between those
   // offsets is the moire that reads as broken artwork. Left fractional when zoomed out,
@@ -1149,8 +1213,8 @@ function drawMatch(canvas, match, terrain, world, zoom, now) {
   const cell = zoom ? Math.max(1, Math.round(exact)) : exact;
   const viewW = width / cell, viewH = height / cell;
 
-  const centreX = zoom ? camera.x : mapW / 2;
-  const centreY = zoom ? camera.y : mapH / 2;
+  const centreX = zoom ? camera.x : played.x;
+  const centreY = zoom ? camera.y : played.y;
 
   // Clamped to the map, unless the view is larger than the map, in which case it is
   // centred and the surround is left black.
@@ -1530,25 +1594,32 @@ function mixHex(a, b, k) {
  * than as something happening in the world.
  */
 function drawMining(ctx, v) {
-  const { cx, cy, rot, span, cell, now } = v;
+  const { cx, cy, rot, cell, now, colour } = v;
   const t = now / 1000 * 60;                      // Ticks, for the same wobble rate.
-  const nose = span / 2;
+
+  // From the nose of the hitbox, not the edge of the sprite: a unit sprite overhangs its
+  // hitbox, so measuring from it starts the beam floating outside the machine.
+  const nose = (v.hitSize / 2 + absin(t, 1.1, 0.5) / 8) * cell;
   const px = cx + Math.cos(-rot * Math.PI / 180) * nose;
   const py = cy + Math.sin(-rot * Math.PI / 180) * nose;
 
+  // The target point drifts, so the beam never sits perfectly still on a tile.
   const swing = cell / 8;
   const ex = v.sx(v.tile % v.world.width) + cell / 2 + Math.sin(t / 12) * swing;
   const ey = v.sy(Math.floor(v.tile / v.world.width)) + cell / 2 + Math.sin(t / 14) * swing;
 
-  const flash = 0.7 + 0.3 * Math.abs(Math.sin(t / 2));
+  // Solid, flashing between light grey and white. Fading the alpha instead made it read
+  // as a faint guide line rather than as a beam doing work.
+  const flash = 0.7 + absin(t, 0.5, 0.3);
   ctx.save();
-  ctx.strokeStyle = `rgba(255,255,255,${flash})`;
-  ctx.lineWidth = Math.max(1, cell * 0.15);
+  ctx.lineCap = "round";
+  ctx.strokeStyle = mixHex("#d3d3d3", "#ffffff", flash);
+  ctx.lineWidth = Math.max(1, cell * 1.2 / 8);
   ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(ex, ey); ctx.stroke();
 
-  ctx.fillStyle = "#d99d73";
+  ctx.fillStyle = colour || "#d99d73";
   ctx.beginPath();
-  ctx.arc(ex, ey, Math.max(1.5, cell * (0.12 + 0.06 * Math.abs(Math.sin(t / 5)))), 0, Math.PI * 2);
+  ctx.arc(ex, ey, Math.max(1.2, cell * (1 + absin(t, 5, 0.5)) / 8), 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 }
@@ -1684,17 +1755,20 @@ function drawUnits(ctx, world, v) {
     }
 
     if (unit.flags & 1 && unit.mine >= 0) {
-      drawMining(ctx, { cx, cy, rot, span, cell, sx, sy, now, world, tile: unit.mine });
+      const overlay = v.terrain
+        ? v.terrain.palette[String(v.terrain.overlay[unit.mine])] : null;
+      const colour = oreColour(overlay && overlay.name);
+      drawMining(ctx, {
+        cx, cy, rot, cell, sx, sy, now, world, colour,
+        hitSize: type.size || 1, tile: unit.mine,
+      });
       // The engine throws a handful of chips off the tile on every mining hit. Emitted
       // here because the fact that mining is happening is in the observation; the chips
       // are only ever a drawing.
       if (!unit.mineAt || now - unit.mineAt > 180) {
         unit.mineAt = now;
-        const overlay = v.terrain
-          ? v.terrain.palette[String(v.terrain.overlay[unit.mine])] : null;
         world.effects.add("mine", 20, {
-          x: unit.mine % world.width, y: Math.floor(unit.mine / world.width),
-          color: oreColour(overlay && overlay.name),
+          x: unit.mine % world.width, y: Math.floor(unit.mine / world.width), color: colour,
         });
       }
     }
@@ -1767,10 +1841,22 @@ function updateCard(match) {
 
   const join = card.querySelector(".join");
   join.classList.toggle("on", !!match.watchable && !!match.game_port);
-  if (match.watchable && match.game_port) {
+  if (match.watchable && match.game_port && !join.dataset.port) {
+    // Rebuilt only when the port changes: the card refreshes twice a second, and
+    // replacing the button under the cursor would swallow the click.
+    join.dataset.port = match.game_port;
+    const address = `127.0.0.1:${match.game_port}`;
     join.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
       stroke-width="2" aria-hidden="true"><path d="M10 8l6 4-6 4z"/><circle cx="12" cy="12" r="9"/></svg>
-      ${t("joinInGame")} <b>127.0.0.1:${match.game_port}</b>`;
+      ${t("joinInGame")} <b>${address}</b><button type="button">${t("copy")}</button>`;
+    join.querySelector("button").onclick = event => {
+      event.stopPropagation();          // The card itself opens the detail view.
+      const button = event.currentTarget;
+      navigator.clipboard.writeText(address).then(() => {
+        button.textContent = t("copied");
+        setTimeout(() => { button.textContent = t("copy"); }, 1400);
+      }, () => { button.textContent = address; });
+    };
   }
 
   const items = card.querySelector(".items");
@@ -1950,8 +2036,15 @@ function drawLearning(generations) {
   }
 
   const values = points.map(p => p.mean_reward);
-  const min = Math.min(...values), max = Math.max(...values);
-  const span = (max - min) || 1;
+  let min = Math.min(...values), max = Math.max(...values);
+  if (max - min < 1e-9) {
+    // A run whose reward has not moved yet draws one flat line. Pinned to the floor of the
+    // frame it reads as zero; padded, it reads as steady, which is what it is.
+    const pad = Math.max(0.5, Math.abs(max) * 0.5);
+    min -= pad;
+    max += pad;
+  }
+  const span = max - min;
   const stepX = canvas.width / (points.length - 1);
   const yOf = v => canvas.height - ((v - min) / span) * (canvas.height - 22 * ratio) - 11 * ratio;
 
