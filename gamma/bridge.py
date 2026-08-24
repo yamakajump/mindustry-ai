@@ -171,11 +171,21 @@ class Bridge:
         # into a fresh array the caller can safely hold on to.
         return np.frombuffer(payload, dtype=np.uint8).reshape(shape)
 
-    def reset(self, map_name: str | None = None, mode: str = "survival") -> dict[str, Any]:
-        """Load a map and start a match. Returns the initial observation."""
+    def reset(self, map_name: str | None = None, mode: str = "survival",
+              seed: int | None = None) -> dict[str, Any]:
+        """Load a map and start a match. Returns the initial observation.
+
+        A seed pins the world. Mindustry paints ore on at load time with generation
+        filters and re-randomises every one of them on every load, so the same map name
+        gives a different world each time: measured across three loads, 1339, 1543 and
+        1330 tiles of copper. Pass a seed when two runs have to be comparable, and leave
+        it out when variety is the point.
+        """
         message: dict[str, Any] = {"cmd": "reset", "mode": mode}
         if map_name is not None:
             message["map"] = map_name
+        if seed is not None:
+            message["seed"] = int(seed)
         return self.request(message)
 
     def step(
@@ -222,6 +232,7 @@ class Bridge:
         name: str | None = "groundZero",
         loadout: dict[str, int] | None = None,
         index: int | None = None,
+        seed: int | None = None,
     ):
         """Load a campaign sector, by name for a preset or by index for a generated one.
 
@@ -235,6 +246,8 @@ class Bridge:
             message["name"] = name
         if loadout is not None:
             message["loadout"] = loadout
+        if seed is not None:
+            message["seed"] = int(seed)
         return self.request(message)
 
     def sectors(self) -> dict[str, Any]:

@@ -44,6 +44,15 @@ class Task:
     #: available, because the number is already computed and attached to every sector.
     threat_limit: float = 1.0
 
+    #: Pin the world, so the same task gives the same map every episode.
+    #:
+    #: A Mindustry map is not fixed. Its ore is painted on at load time by generation
+    #: filters that the engine re-randomises on every load, so a task naming one map has
+    #: been handing out a different world each episode all along, and two policies
+    #: compared on it were compared on two. Set this where the point is a controlled
+    #: comparison; leave it out where variety is the point.
+    world_seed: int | None = None
+
     #: Cap on how many worlds to train across. None means the whole pool.
     #:
     #: Hundreds of worlds is what generalisation needs, and it is the wrong place to start.

@@ -183,6 +183,26 @@ public class StepLoop implements ApplicationListener {
         server.reply(reply.toString());
     }
 
+    /**
+     * Pin the world's random draws, so the same request gives the same world.
+     *
+     * <p>A Mindustry map is not the fixed thing it looks like. Its ore is painted on at
+     * load time by generation filters, and {@code World.applyFilters} calls
+     * {@code filter.randomize()} on every one of them before running it, which draws a
+     * fresh seed from the global generator. Measured across three loads of the same map:
+     * 1339, 1543 and 1330 tiles of copper. Every "fixed map" task in this project has
+     * been handing the agent a different world each episode without saying so, and any
+     * two policies compared on one were compared on two.
+     *
+     * <p>Seeding the generator the filters draw from is enough to make a load
+     * reproducible. No seed means the engine's own behaviour, unchanged.
+     */
+    private void seedWorld(Jval message) {
+        if (message.get("seed") != null) {
+            arc.math.Mathf.rand.setSeed(message.get("seed").asInt());
+        }
+    }
+
     private void handleReset(Jval message) {
         String mapName = message.get("map") == null ? null : message.get("map").asString();
         String modeName = message.get("mode") == null ? "survival" : message.get("mode").asString();
@@ -203,6 +223,8 @@ public class StepLoop implements ApplicationListener {
         // several times an hour, and without this a spectator is dropped every time and has
         // to rejoin to see the next one. This is the same handshake the official server
         // uses to change map with players on it.
+        seedWorld(message);
+
         var reloader = new mindustry.net.WorldReloader();
         reloader.begin();
 
@@ -388,6 +410,8 @@ public class StepLoop implements ApplicationListener {
         // several times an hour, and without this a spectator is dropped every time and has
         // to rejoin to see the next one. This is the same handshake the official server
         // uses to change map with players on it.
+        seedWorld(message);
+
         var reloader = new mindustry.net.WorldReloader();
         reloader.begin();
 

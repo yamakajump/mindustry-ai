@@ -88,10 +88,19 @@ def test_alpha_beats_random_on_t1(env: MindustryEnv) -> None:
     Marked perf because it plays several full episodes. If this inverts, either Alpha
     broke or the task stopped measuring anything.
     """
-    alpha = AlphaPolicy(env)
-    alpha.reset()
-    scripted = run_episode(env, alpha)
-    chaotic = run_episode(env, MaskedRandomPolicy(env.action_space, seed=0))
+    # Both policies play the same world. Without the pin they do not: Mindustry paints
+    # ore on at load time and re-randomises it every load, so this compared two policies
+    # on two different maps and duly inverted, with random scoring 39 against Alpha's 16.
+    from dataclasses import replace
+
+    env.task = replace(tasks.T1_COPPER, world_seed=20260824)
+    try:
+        alpha = AlphaPolicy(env)
+        alpha.reset()
+        scripted = run_episode(env, alpha)
+        chaotic = run_episode(env, MaskedRandomPolicy(env.action_space, seed=0))
+    finally:
+        env.task = tasks.T1_COPPER
 
     assert scripted["reward"] > chaotic["reward"]
     assert scripted["applied"] > chaotic["applied"]

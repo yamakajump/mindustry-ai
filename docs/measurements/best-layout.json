@@ -1,0 +1,777 @@
+{
+  "map": "Ancient_Caldera",
+  "rectangle": [
+    13,
+    13
+  ],
+  "origin": [
+    124,
+    21
+  ],
+  "core": [
+    130,
+    32
+  ],
+  "ore_tiles": 8,
+  "ticks": 1800,
+  "seconds": 303.5,
+  "history": [
+    {
+      "generation": 1,
+      "best_delivered": 21,
+      "best_cost": 56,
+      "working": 25,
+      "mean_fitness": 5.22
+    },
+    {
+      "generation": 2,
+      "best_delivered": 22,
+      "best_cost": 54,
+      "working": 32,
+      "mean_fitness": 10.23
+    },
+    {
+      "generation": 3,
+      "best_delivered": 33,
+      "best_cost": 49,
+      "working": 36,
+      "mean_fitness": 14.68
+    },
+    {
+      "generation": 4,
+      "best_delivered": 33,
+      "best_cost": 49,
+      "working": 40,
+      "mean_fitness": 18.72
+    },
+    {
+      "generation": 5,
+      "best_delivered": 34,
+      "best_cost": 49,
+      "working": 39,
+      "mean_fitness": 23.05
+    },
+    {
+      "generation": 6,
+      "best_delivered": 44,
+      "best_cost": 52,
+      "working": 40,
+      "mean_fitness": 27.02
+    },
+    {
+      "generation": 7,
+      "best_delivered": 44,
+      "best_cost": 51,
+      "working": 40,
+      "mean_fitness": 30.79
+    },
+    {
+      "generation": 8,
+      "best_delivered": 44,
+      "best_cost": 51,
+      "working": 40,
+      "mean_fitness": 35.3
+    },
+    {
+      "generation": 9,
+      "best_delivered": 44,
+      "best_cost": 51,
+      "working": 40,
+      "mean_fitness": 37.58
+    },
+    {
+      "generation": 10,
+      "best_delivered": 44,
+      "best_cost": 50,
+      "working": 40,
+      "mean_fitness": 40.52
+    },
+    {
+      "generation": 11,
+      "best_delivered": 44,
+      "best_cost": 48,
+      "working": 40,
+      "mean_fitness": 41.87
+    },
+    {
+      "generation": 12,
+      "best_delivered": 44,
+      "best_cost": 48,
+      "working": 40,
+      "mean_fitness": 40.3
+    },
+    {
+      "generation": 13,
+      "best_delivered": 44,
+      "best_cost": 48,
+      "working": 40,
+      "mean_fitness": 41.58
+    },
+    {
+      "generation": 14,
+      "best_delivered": 44,
+      "best_cost": 46,
+      "working": 40,
+      "mean_fitness": 40.59
+    },
+    {
+      "generation": 15,
+      "best_delivered": 44,
+      "best_cost": 42,
+      "working": 40,
+      "mean_fitness": 40.91
+    },
+    {
+      "generation": 16,
+      "best_delivered": 44,
+      "best_cost": 40,
+      "working": 40,
+      "mean_fitness": 41.47
+    },
+    {
+      "generation": 17,
+      "best_delivered": 44,
+      "best_cost": 38,
+      "working": 40,
+      "mean_fitness": 41.64
+    },
+    {
+      "generation": 18,
+      "best_delivered": 44,
+      "best_cost": 38,
+      "working": 40,
+      "mean_fitness": 40.37
+    },
+    {
+      "generation": 19,
+      "best_delivered": 44,
+      "best_cost": 38,
+      "working": 40,
+      "mean_fitness": 41.48
+    },
+    {
+      "generation": 20,
+      "best_delivered": 44,
+      "best_cost": 38,
+      "working": 40,
+      "mean_fitness": 40.8
+    },
+    {
+      "generation": 21,
+      "best_delivered": 44,
+      "best_cost": 37,
+      "working": 40,
+      "mean_fitness": 40.54
+    },
+    {
+      "generation": 22,
+      "best_delivered": 44,
+      "best_cost": 37,
+      "working": 40,
+      "mean_fitness": 40.59
+    },
+    {
+      "generation": 23,
+      "best_delivered": 44,
+      "best_cost": 37,
+      "working": 40,
+      "mean_fitness": 41.27
+    },
+    {
+      "generation": 24,
+      "best_delivered": 44,
+      "best_cost": 37,
+      "working": 40,
+      "mean_fitness": 42.7
+    },
+    {
+      "generation": 25,
+      "best_delivered": 44,
+      "best_cost": 36,
+      "working": 40,
+      "mean_fitness": 42.33
+    },
+    {
+      "generation": 26,
+      "best_delivered": 44,
+      "best_cost": 36,
+      "working": 40,
+      "mean_fitness": 40.71
+    },
+    {
+      "generation": 27,
+      "best_delivered": 44,
+      "best_cost": 34,
+      "working": 40,
+      "mean_fitness": 42.39
+    },
+    {
+      "generation": 28,
+      "best_delivered": 44,
+      "best_cost": 33,
+      "working": 40,
+      "mean_fitness": 40.28
+    },
+    {
+      "generation": 29,
+      "best_delivered": 44,
+      "best_cost": 33,
+      "working": 40,
+      "mean_fitness": 42.32
+    },
+    {
+      "generation": 30,
+      "best_delivered": 44,
+      "best_cost": 32,
+      "working": 40,
+      "mean_fitness": 39.73
+    }
+  ],
+  "best": {
+    "delivered": 44,
+    "blocks": 90,
+    "layout": ".oo.o>o+<+.^.\n.D.D+oov.D.oD\n...++o...+.DD\nD..D^^o+>.+..\nD<.+oDoD.D>.o\noo.D......+D.\nD.......D....\n.........+.<.\n.D^oD+.D..Do.\n>oo+^D.v...>^\n.D.D+.<.Do.D^\nv.D+vv+v.D...\n.+.<^..<...+o",
+    "cells": [
+      [
+        1,
+        0,
+        "junction",
+        0
+      ],
+      [
+        3,
+        0,
+        "conveyor",
+        1
+      ],
+      [
+        4,
+        0,
+        "conveyor",
+        2
+      ],
+      [
+        7,
+        0,
+        "conveyor",
+        1
+      ],
+      [
+        11,
+        0,
+        "junction",
+        0
+      ],
+      [
+        12,
+        0,
+        "router",
+        0
+      ],
+      [
+        0,
+        1,
+        "conveyor",
+        3
+      ],
+      [
+        2,
+        1,
+        "mechanical-drill",
+        0
+      ],
+      [
+        3,
+        1,
+        "junction",
+        0
+      ],
+      [
+        4,
+        1,
+        "conveyor",
+        3
+      ],
+      [
+        5,
+        1,
+        "conveyor",
+        3
+      ],
+      [
+        6,
+        1,
+        "junction",
+        0
+      ],
+      [
+        7,
+        1,
+        "conveyor",
+        3
+      ],
+      [
+        9,
+        1,
+        "mechanical-drill",
+        0
+      ],
+      [
+        1,
+        2,
+        "mechanical-drill",
+        0
+      ],
+      [
+        3,
+        2,
+        "mechanical-drill",
+        0
+      ],
+      [
+        4,
+        2,
+        "junction",
+        0
+      ],
+      [
+        6,
+        2,
+        "conveyor",
+        1
+      ],
+      [
+        8,
+        2,
+        "mechanical-drill",
+        0
+      ],
+      [
+        9,
+        2,
+        "router",
+        0
+      ],
+      [
+        11,
+        2,
+        "mechanical-drill",
+        0
+      ],
+      [
+        12,
+        2,
+        "conveyor",
+        2
+      ],
+      [
+        0,
+        3,
+        "conveyor",
+        0
+      ],
+      [
+        1,
+        3,
+        "router",
+        0
+      ],
+      [
+        2,
+        3,
+        "router",
+        0
+      ],
+      [
+        3,
+        3,
+        "junction",
+        0
+      ],
+      [
+        4,
+        3,
+        "conveyor",
+        2
+      ],
+      [
+        5,
+        3,
+        "mechanical-drill",
+        0
+      ],
+      [
+        7,
+        3,
+        "conveyor",
+        3
+      ],
+      [
+        11,
+        3,
+        "conveyor",
+        0
+      ],
+      [
+        12,
+        3,
+        "conveyor",
+        2
+      ],
+      [
+        1,
+        4,
+        "mechanical-drill",
+        0
+      ],
+      [
+        2,
+        4,
+        "conveyor",
+        2
+      ],
+      [
+        3,
+        4,
+        "router",
+        0
+      ],
+      [
+        4,
+        4,
+        "mechanical-drill",
+        0
+      ],
+      [
+        5,
+        4,
+        "junction",
+        0
+      ],
+      [
+        7,
+        4,
+        "mechanical-drill",
+        0
+      ],
+      [
+        10,
+        4,
+        "mechanical-drill",
+        0
+      ],
+      [
+        11,
+        4,
+        "router",
+        0
+      ],
+      [
+        9,
+        5,
+        "junction",
+        0
+      ],
+      [
+        11,
+        5,
+        "conveyor",
+        1
+      ],
+      [
+        0,
+        6,
+        "mechanical-drill",
+        0
+      ],
+      [
+        8,
+        6,
+        "mechanical-drill",
+        0
+      ],
+      [
+        0,
+        7,
+        "router",
+        0
+      ],
+      [
+        1,
+        7,
+        "router",
+        0
+      ],
+      [
+        3,
+        7,
+        "mechanical-drill",
+        0
+      ],
+      [
+        10,
+        7,
+        "junction",
+        0
+      ],
+      [
+        11,
+        7,
+        "mechanical-drill",
+        0
+      ],
+      [
+        0,
+        8,
+        "mechanical-drill",
+        0
+      ],
+      [
+        1,
+        8,
+        "conveyor",
+        1
+      ],
+      [
+        3,
+        8,
+        "junction",
+        0
+      ],
+      [
+        4,
+        8,
+        "router",
+        0
+      ],
+      [
+        5,
+        8,
+        "mechanical-drill",
+        0
+      ],
+      [
+        6,
+        8,
+        "router",
+        0
+      ],
+      [
+        7,
+        8,
+        "mechanical-drill",
+        0
+      ],
+      [
+        9,
+        8,
+        "mechanical-drill",
+        0
+      ],
+      [
+        10,
+        8,
+        "conveyor",
+        0
+      ],
+      [
+        12,
+        8,
+        "router",
+        0
+      ],
+      [
+        0,
+        9,
+        "mechanical-drill",
+        0
+      ],
+      [
+        3,
+        9,
+        "mechanical-drill",
+        0
+      ],
+      [
+        4,
+        9,
+        "conveyor",
+        2
+      ],
+      [
+        5,
+        9,
+        "conveyor",
+        2
+      ],
+      [
+        6,
+        9,
+        "router",
+        0
+      ],
+      [
+        7,
+        9,
+        "junction",
+        0
+      ],
+      [
+        8,
+        9,
+        "conveyor",
+        0
+      ],
+      [
+        10,
+        9,
+        "junction",
+        0
+      ],
+      [
+        3,
+        10,
+        "junction",
+        0
+      ],
+      [
+        4,
+        10,
+        "junction",
+        0
+      ],
+      [
+        5,
+        10,
+        "router",
+        0
+      ],
+      [
+        9,
+        10,
+        "junction",
+        0
+      ],
+      [
+        11,
+        10,
+        "mechanical-drill",
+        0
+      ],
+      [
+        12,
+        10,
+        "mechanical-drill",
+        0
+      ],
+      [
+        1,
+        11,
+        "mechanical-drill",
+        0
+      ],
+      [
+        3,
+        11,
+        "mechanical-drill",
+        0
+      ],
+      [
+        4,
+        11,
+        "junction",
+        0
+      ],
+      [
+        5,
+        11,
+        "router",
+        0
+      ],
+      [
+        6,
+        11,
+        "router",
+        0
+      ],
+      [
+        7,
+        11,
+        "conveyor",
+        3
+      ],
+      [
+        9,
+        11,
+        "mechanical-drill",
+        0
+      ],
+      [
+        11,
+        11,
+        "router",
+        0
+      ],
+      [
+        12,
+        11,
+        "mechanical-drill",
+        0
+      ],
+      [
+        1,
+        12,
+        "router",
+        0
+      ],
+      [
+        2,
+        12,
+        "router",
+        0
+      ],
+      [
+        4,
+        12,
+        "router",
+        0
+      ],
+      [
+        5,
+        12,
+        "conveyor",
+        0
+      ],
+      [
+        6,
+        12,
+        "router",
+        0
+      ],
+      [
+        7,
+        12,
+        "junction",
+        0
+      ],
+      [
+        8,
+        12,
+        "conveyor",
+        1
+      ],
+      [
+        9,
+        12,
+        "junction",
+        0
+      ],
+      [
+        11,
+        12,
+        "conveyor",
+        2
+      ]
+    ]
+  }
+}

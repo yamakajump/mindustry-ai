@@ -210,11 +210,14 @@ class MindustryEnv(gym.Env):
     def _load(self, bridge: Bridge) -> dict[str, Any]:
         """Start a match: a generated sector, a named preset, or a custom map."""
         if self.task.procedural:
-            raw = bridge.sector(index=self._next_sector(bridge), loadout=self.task.loadout)
+            raw = bridge.sector(index=self._next_sector(bridge), loadout=self.task.loadout,
+                                seed=self.task.world_seed)
         elif self.task.sector is not None:
-            raw = bridge.sector(self.task.sector, self.task.loadout)
+            raw = bridge.sector(self.task.sector, self.task.loadout,
+                                seed=self.task.world_seed)
         else:
-            raw = bridge.reset(self.task.map_name, self.task.mode)
+            raw = bridge.reset(self.task.map_name, self.task.mode,
+                               seed=self.task.world_seed)
         if self.embodied:
             raw = bridge.embody()
         return raw
