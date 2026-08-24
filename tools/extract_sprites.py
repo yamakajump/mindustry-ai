@@ -92,6 +92,9 @@ BLOCK_OVERLAYS = {
 #: The ring drawn behind the ore a unit carries on its back.
 UI_SPRITES = ("ring-item",)
 
+#: Teams that ship their own painted plates rather than a tinted generic one.
+PALETTE_TEAMS = ("sharded", "crux")
+
 #: Damage cracks, one sheet per block size and eight stages of ruin.
 #:
 #: The engine picks a stage from the health left and lays it over the block. Only sizes one
@@ -167,10 +170,13 @@ def build(jar: Path, wanted: dict[str, int], out_dir: Path) -> dict:
                 if cell is not None:
                     found[f"{name}-cell"] = [cell]
 
-            # A block may carry a team-coloured overlay, drawn over it in the team colour.
-            team = load(f"{name}-team")
-            if team is not None:
-                found[f"{name}-team"] = [team]
+            # The team plate a block wears. The engine ships a painted version per team
+            # and only tints the generic one when a team has no palette of its own, so
+            # both are packed and the viewer prefers the painted one.
+            for suffix in ("-team", *(f"-team-{team}" for team in PALETTE_TEAMS)):
+                plate = load(f"{name}{suffix}")
+                if plate is not None:
+                    found[f"{name}{suffix}"] = [plate]
 
             if name == "conveyor":
                 for shape in range(CONVEYOR_SHAPES):

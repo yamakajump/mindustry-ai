@@ -68,6 +68,19 @@ mining, the building reached full progress, the building vanished. The one effec
 could not be inferred, ore handed to the core, is recorded by the bridge at the moment it
 happens and sent. Nothing is drawn that did not occur.
 
+A team plate is drawn the way the engine chooses it, and the distinction matters: a team
+with its own painted plate gets that plate as it ships, and only a team without one gets
+the generic plate multiplied by its colour. Multiplied, never filled. Filling the
+silhouette with a flat colour throws away the bevels and the shading, which is what turned
+a core into a grey box with nothing on it.
+
+Coverage is checked against what actually appears rather than asserted. Across the maps in
+use that is twenty-nine block types, floors, ores, props, static walls and buildings, and
+every one of them resolves to a sprite with its variants, its edge sheet, its large sheet
+and its overlays as applicable.
+
 What is deliberately not reproduced: the legs of walking units, the barrel parts of a
-turret, and the item flow through a junction, which draws nothing in the game either. They
-are listed here so the next person knows they were considered rather than missed.
+turret, the laser links between power nodes, the flame and glow drawers of the crafting
+blocks, and the item flow through a junction, which draws nothing in the game either. None
+of those appear in the curriculum as it stands. They are listed so the next person knows
+they were considered rather than missed.

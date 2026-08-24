@@ -625,6 +625,7 @@ const TEAM_SHARDED = 1;   // The agent's own team on every map used here.
 
 /** Team colours, taken from the engine so a side reads the same as it does in game. */
 const TEAM_COLOUR = { 0: "#4d4e58", 1: "#ffd37f", 2: "#f25555", 3: "#54d67d", 4: "#7dcbf0" };
+const TEAM_NAME = { 0: "derelict", 1: "sharded", 2: "crux", 3: "malis", 4: "green" };
 const teamColour = id => TEAM_COLOUR[id] || "#c0c0c8";
 
 /** Pal.shadow, and the grey a shadowed tile is multiplied by. */
@@ -742,9 +743,19 @@ function tintedFrame(name, s, colour) {
   const canvas = Object.assign(document.createElement("canvas"), { width: s.w, height: s.h });
   const ctx = canvas.getContext("2d");
   ctx.drawImage(atlas, s.x, s.y, s.w, s.h, 0, 0, s.w, s.h);
-  ctx.globalCompositeOperation = "source-in";
+
+  // Multiplied, not replaced. `Draw.color` sets a vertex colour that multiplies the
+  // texture, so a team plate keeps its bevels and its shading and comes out as the
+  // patterned thing the game draws. Filling the silhouette instead gives a flat blob,
+  // which is why the core looked like a grey box with nothing on it.
+  ctx.globalCompositeOperation = "multiply";
   ctx.fillStyle = colour;
   ctx.fillRect(0, 0, s.w, s.h);
+  // Multiply leaves the transparent margin coloured, so the sprite is stamped back over
+  // it as a mask.
+  ctx.globalCompositeOperation = "destination-in";
+  ctx.drawImage(atlas, s.x, s.y, s.w, s.h, 0, 0, s.w, s.h);
+
   tintCache.set(key, canvas);
   return canvas;
 }
@@ -1276,10 +1287,17 @@ function drawBlockSprite(ctx, world, tile, b, info, v) {
   const top_ = spriteOf(info.name + "-top");
   if (top_) blit(top_);
 
-  // The team-coloured plate some blocks wear. On a core it is most of what tells you
-  // whose it is.
-  const team = tinted(info.name + "-team", teamColour(b.team));
-  if (team) ctx.drawImage(team, -span / 2, -span / 2, span, span);
+  // The team plate. A team with its own painted version is drawn as it ships; anything
+  // else falls back to the generic plate multiplied by the team colour, which is exactly
+  // the choice the engine makes.
+  const painted = spriteOf(`${info.name}-team-${TEAM_NAME[b.team]}`);
+  if (painted) {
+    ctx.drawImage(atlas, painted.x, painted.y, painted.w, painted.h,
+      -span / 2, -span / 2, span, span);
+  } else {
+    const plate = tinted(info.name + "-team", teamColour(b.team));
+    if (plate) ctx.drawImage(plate, -span / 2, -span / 2, span, span);
+  }
 
   ctx.restore();
 }
