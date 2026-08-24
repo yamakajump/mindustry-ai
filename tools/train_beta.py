@@ -233,6 +233,11 @@ class EnvWorker:
             # Without this every run leaves its Mindustry servers alive: they hold their
             # ports, so the next run cannot bind them, and they quietly eat memory. An
             # earlier session left eighteen of them running.
+            if self.recorder is not None:
+                # Closed before the file is deleted. Windows refuses to unlink an open
+                # file, and the refusal came out of a `finally`, so it took the rest of
+                # the cleanup with it and leaked the server.
+                self.recorder.finish()
             if self.archive is not None:
                 # The episode in progress when a run stops has no result, so its partial
                 # recording is dropped rather than left to be mistaken for a real one.

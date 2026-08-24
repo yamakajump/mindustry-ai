@@ -418,7 +418,11 @@ public class SceneEncoder {
      * independently of the direction it was placed in, and recoils when it fires. Drawing
      * it at its build rotation makes a defence line look painted on.
      *
-     * <p>Layout per turret: {@code [tile, angle, recoilX, recoilY, heat]}.
+     * <p>The per-barrel recoils travel too. A duo alternates between two barrels, and
+     * drawing both at the same offset makes it fire from a single fused block instead of
+     * pumping one barrel at a time.
+     *
+     * <p>Layout per turret: {@code [tile, angle, recoilX, recoilY, heat, left, right]}.
      */
     private Jval encodeTurrets() {
         Jval array = Jval.newArray();
@@ -436,6 +440,13 @@ public class SceneEncoder {
             add(array, round(turret.recoilOffset.x / Vars.tilesize));
             add(array, round(turret.recoilOffset.y / Vars.tilesize));
             add(array, clamp(Math.round(turret.heat * 100)));
+
+            float[] recoils = turret.curRecoils;
+            float overall = turret.curRecoil;
+            add(array, clamp(Math.round((recoils != null && recoils.length > 0
+                ? recoils[0] : overall) * 100)));
+            add(array, clamp(Math.round((recoils != null && recoils.length > 1
+                ? recoils[1] : overall) * 100)));
         });
 
         return array;

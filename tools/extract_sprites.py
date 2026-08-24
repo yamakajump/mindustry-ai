@@ -84,12 +84,21 @@ def is_drawn(path: str) -> bool:
     return not (team and team.group(1) not in KEEP_TEAMS)
 
 
+#: `block-1` to `block-4` are the plain plates a turret without a base of its own stands
+#: on, one per block size. They are not variants of a `block-` sprite, and grouping them as
+#: such makes a one-tile turret pick a four-tile plate.
+BASE_PLATE = re.compile(r"^block-\d+$")
+
+
 def group_of(stem: str) -> tuple[str, int]:
     """The logical sprite a file belongs to, and its position within it.
 
     Returns the group name and the frame or variant index, zero-based for sheets and
     one-based for variants, matching how the engine numbers each.
     """
+    if BASE_PLATE.match(stem):
+        return stem, 0
+
     sheet = SHEET.match(stem)
     if sheet:
         return sheet.group("group"), int(sheet.group("frame"))

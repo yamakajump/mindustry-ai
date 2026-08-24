@@ -94,8 +94,16 @@ class ReplayArchive:
         return episode
 
     def discard(self, number: int) -> None:
-        """Drop a recording that will never be committed, so it does not linger."""
-        self.pending(number).unlink(missing_ok=True)
+        """Drop a recording that will never be committed, so it does not linger.
+
+        Tolerant of a file still held open: this runs on the way out of a worker that may
+        be unwinding from an error, and a leftover partial recording is a smaller problem
+        than an exception raised inside a cleanup path.
+        """
+        try:
+            self.pending(number).unlink(missing_ok=True)
+        except OSError:
+            pass
 
     # Selection -------------------------------------------------------------------
 

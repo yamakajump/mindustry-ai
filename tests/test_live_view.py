@@ -171,6 +171,17 @@ def test_a_name_from_outside_the_archive_resolves_to_nothing(tmp_path: Path) -> 
     assert archive.resolve("ep000000-pos000100.jsonl.gz") is not None
 
 
+def test_discarding_a_recording_still_open_does_not_raise(tmp_path: Path) -> None:
+    """This runs while a worker unwinds from an error, and Windows will not unlink an open
+    file. Raising here once took the rest of the cleanup with it and leaked a server."""
+    archive = ReplayArchive(tmp_path)
+    handle = archive.pending(0).open("wb")
+    try:
+        archive.discard(0)
+    finally:
+        handle.close()
+
+
 def test_a_previous_run_leaves_no_replays_behind(tmp_path: Path) -> None:
     """Its best episode belongs to another policy and would top this run's board."""
     (tmp_path / "ep000001-pos009999.jsonl.gz").write_bytes(b"old")

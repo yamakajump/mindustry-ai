@@ -101,18 +101,21 @@
   .rows { display: grid; grid-template-columns: 1fr 1fr; gap: 2px var(--s3); font-size: 12.5px; }
   .row { display: flex; justify-content: space-between; gap: var(--s2); }
   .row > span:first-child { color: var(--muted); }
+  /* Laid over the map rather than above it. Only one match is joinable, and a banner in
+     the flow made that card taller than the other five, which reads as a bug. Out of flow
+     it costs no layout at all. */
+  .canvas-slot { position: relative; }
   .join {
-    background: rgba(121,221,154,.1); border: 1px solid rgba(121,221,154,.32);
-    color: var(--good); border-radius: 7px; padding: 6px 9px; font-size: 12px; display: none;
+    position: absolute; left: 7px; right: 7px; top: 7px; z-index: 1; display: none;
+    background: rgba(11,11,16,.86); border: 1px solid rgba(121,221,154,.45);
+    color: var(--good); border-radius: 7px; padding: 5px 8px; font-size: 12px;
   }
   .join.on { display: flex; align-items: center; gap: 6px; }
   .join button {
-    margin-left: auto; background: rgba(121,221,154,.16); border: 1px solid rgba(121,221,154,.4);
-    color: var(--good); border-radius: 5px; padding: 2px 8px; font-size: 11px;
+    margin-left: auto; background: rgba(121,221,154,.18); border: 1px solid rgba(121,221,154,.45);
+    color: var(--good); border-radius: 5px; padding: 4px 10px; font-size: 11px;
   }
-  .join button:hover { background: rgba(121,221,154,.28); }
-  /* Reserved on every card, so the one match you can join is not the odd size out. */
-  .join:not(.on) { display: block; visibility: hidden; }
+  .join button:hover { background: rgba(121,221,154,.3); }
   .join b { color: var(--text); font-family: ui-monospace, monospace; }
   .items { display: flex; flex-wrap: wrap; gap: var(--s1); }
   .item { background: var(--raised); border: 1px solid var(--line); border-radius: 5px; padding: 1px 7px; font-size: 12px; }
@@ -387,17 +390,26 @@ function imageOf(stem) {
 
   images.set(stem, null);
   const image = new Image();
-  // The ground is painted into a cached canvas, so a sprite that arrives after that paint
-  // would never appear. Bumping the epoch invalidates every cached layer, which costs one
-  // repaint per sprite on the first seconds of a run and nothing after.
-  image.onload = () => { images.set(stem, image); spriteEpoch++; };
+  image.onload = () => { images.set(stem, image); staleAfterSprites(); };
   image.onerror = () => images.set(stem, false);
   image.src = `assets/sprites/${encodeURIComponent(stem)}.png`;
   return null;
 }
 
-/** Bumped whenever a sprite finishes loading, so cached paintings know they are stale. */
+/**
+ * Marks every cached painting stale once a burst of sprites has landed.
+ *
+ * The ground is painted into a cached canvas, so a sprite arriving after that paint would
+ * never appear and the layer has to be thrown away. Doing that per sprite meant seventy
+ * eight repaints of sixty-five thousand tiles across six matches in the first seconds of a
+ * run, which is exactly the stall it looked like. Coalesced, a burst costs one.
+ */
 let spriteEpoch = 0;
+let staleTimer = 0;
+function staleAfterSprites() {
+  if (staleTimer) return;
+  staleTimer = setTimeout(() => { staleTimer = 0; spriteEpoch++; }, 400);
+}
 
 /** The sprite group behind a name: its size in tiles, its variants, its sheet grid. */
 const spriteOf = name => (spriteIndex && name) ? (spriteIndex[name] || null) : null;
@@ -442,7 +454,7 @@ const terrainPending = new Set();
 
 async function loadTerrain(index, version) {
   const known = terrains.get(index);
-  if (known && known.version === version) return known;
+  if (known && known.fetched === version) return known;
   if (terrainPending.has(index)) return known || null;
 
   terrainPending.add(index);
@@ -453,12 +465,25 @@ async function loadTerrain(index, version) {
       ["floor", "overlay", "block"].map(k => inflate(data[k]))
     );
     const decoded = {
-      version, width: data.width, height: data.height, palette: data.palette,
+      // `fetched` is what the server called this map; `version` is what it contains. A
+      // new episode on the same sector sends a new number for the same terrain, and
+      // keying the caches on that number threw away the darkness, the bounds and every
+      // painted layer for a map that had not changed a tile.
+      fetched: version, version, width: data.width, height: data.height, palette: data.palette,
       floor: new Uint16Array(floor.buffer, floor.byteOffset, tiles),
       overlay: new Uint16Array(overlay.buffer, overlay.byteOffset, tiles),
       block: new Uint16Array(block.buffer, block.byteOffset, tiles),
+      //: Block id to sprite name, filled as ids are met. The palette is keyed by string,
+      //: and converting an id to one per tile is a cost worth paying once.
+      names: [],
       layer: null, layerKey: "",
     };
+    if (known && sameTerrain(known, decoded)) {
+      known.fetched = version;
+      known.palette = decoded.palette;
+      return known;
+    }
+
     terrains.set(index, decoded);
     return decoded;
   } catch {
@@ -520,9 +545,10 @@ class World {
     this.readBelts(data.belts || []);
     this.turrets.clear();
     const turrets = data.turrets || [];
-    for (let i = 0; i + 4 < turrets.length; i += 5) {
+    for (let i = 0; i + 6 < turrets.length; i += 7) {
       this.turrets.set(turrets[i], {
         angle: turrets[i + 1], rx: turrets[i + 2], ry: turrets[i + 3], heat: turrets[i + 4],
+        recoils: [turrets[i + 5] / 100, turrets[i + 6] / 100],
       });
     }
 
@@ -658,6 +684,17 @@ async function pollScene(index) {
 }
 
 // Rendering --------------------------------------------------------------------
+/** Whether two decoded maps are the same terrain, tile for tile. */
+function sameTerrain(a, b) {
+  if (a.width !== b.width || a.height !== b.height) return false;
+  for (const plane of ["floor", "overlay", "block"]) {
+    const one = a[plane], two = b[plane];
+    if (one.length !== two.length) return false;
+    for (let i = 0; i < one.length; i++) if (one[i] !== two[i]) return false;
+  }
+  return true;
+}
+
 const FALLBACK = { floor: "#1b1b24", solid: "#2e2e3c", built: "#ffcf6b" };
 const TEAM_SHARDED = 1;   // The agent's own team on every map used here.
 
@@ -815,9 +852,15 @@ function computeDarkness(terrain) {
   let head = 0, tail = 0;
 
   const solid = new Uint8Array(w * h);
+  const darkens = [];
   for (let i = 0; i < w * h; i++) {
-    const entry = terrain.palette[String(terrain.block[i])];
-    solid[i] = entry && entry.dark ? 1 : 0;
+    const id = terrain.block[i];
+    let dark = darkens[id];
+    if (dark === undefined) {
+      const entry = terrain.palette[String(id)];
+      dark = darkens[id] = !!(entry && entry.dark);
+    }
+    solid[i] = dark ? 1 : 0;
     if (!solid[i]) queue[tail++] = i;      // Every open tile is a source at distance zero.
   }
 
@@ -921,9 +964,15 @@ function shadowMask(terrain, world) {
     const data = image.data;
     const level = Math.round(SHADOW_LEVEL * 255);
 
+    const casters = [];
     for (let i = 0; i < w * h; i++) {
-      const entry = terrain.palette[String(terrain.block[i])];
-      const casts = entry && entry.shadow && !world.erased.has(i);
+      const id = terrain.block[i];
+      let shadowed = casters[id];
+      if (shadowed === undefined) {
+        const entry = terrain.palette[String(id)];
+        shadowed = casters[id] = !!(entry && entry.shadow);
+      }
+      const casts = shadowed && !world.erased.has(i);
       // Row zero of the mask is the top of the screen, so the world is flipped into it.
       const p = ((h - 1 - ((i / w) | 0)) * w + (i % w)) * 4;
       data[p] = data[p + 1] = data[p + 2] = casts ? level : 255;
@@ -1013,9 +1062,16 @@ function terrainLayer(terrain, world, ox, oy, cols, rows, cell, walls) {
 
   const { width: mapW, height: mapH } = terrain;
   const top = oy + rows - 1;
+  // Resolved once per block id rather than per tile. A full repaint asks three times per
+  // tile across sixty-five thousand of them, and a string conversion plus an object lookup
+  // two hundred thousand times over is most of what a repaint costs.
   const nameOf = id => {
-    const entry = terrain.palette[String(id)];
-    return entry && entry.name !== "air" ? entry.name : null;
+    let name = terrain.names[id];
+    if (name === undefined) {
+      const entry = terrain.palette[String(id)];
+      name = terrain.names[id] = (entry && entry.name !== "air") ? entry.name : null;
+    }
+    return name;
   };
 
   const paint = (id, x, y, tile, fallback) => {
@@ -1235,12 +1291,11 @@ function drawMatch(canvas, match, terrain, world, zoom, now) {
   const sx = wx => (wx - rawX) * cell;
   const sy = wy => (rawY + viewH - 1 - wy) * cell;
 
-  // The order the engine draws in, and it is the order that matters: the shadow lies on
-  // the ground, everything solid stands on top of it, and the darkness closes over the
-  // lot. Painting the shadow last would put a grey film over the whole picture.
-  ctx.drawImage(terrainLayer(terrain, world, ox, oy, cols, rows, cell, false), bx, by);
-  multiplyMask(ctx, shadowMask(terrain, world), terrain, { rawX, rawY, viewH, cell, width, height });
-  ctx.drawImage(terrainLayer(terrain, world, ox, oy, cols, rows, cell, true), bx, by);
+  // Ground, shadow, walls and darkness are four passes that only change when a building
+  // appears or the view moves, which is a few times a second against thirty frames. They
+  // are composited into one picture and blitted, so a frame that changes nothing costs a
+  // single copy instead of two scaled mask multiplies per match.
+  ctx.drawImage(background(terrain, world, ox, oy, cols, rows, cell), bx, by);
 
   const tick = lerp(world.fromTick, world.tick, alpha);
   const view = { ox, oy, cols, rows, cell, sx, sy, now, tick, terrain };
@@ -1249,8 +1304,41 @@ function drawMatch(canvas, match, terrain, world, zoom, now) {
   drawUnits(ctx, world, { cell, sx, sy, now, alpha, tick, terrain });
   drawShots(ctx, world, { cell, sx, sy });
   drawEffects(ctx, world, { cell, sx, sy, now });
+}
 
-  multiplyMask(ctx, darkMask(terrain), terrain, { rawX, rawY, viewH, cell, width, height });
+/**
+ * The unmoving half of a match, composited once and reused.
+ *
+ * Everything here is a function of the map, what has been built on it and where the camera
+ * sits. None of it changes between two frames of the same second, so paying for it per
+ * frame, six matches over, was most of what made the page stutter.
+ */
+function background(terrain, world, ox, oy, cols, rows, cell) {
+  const key = `${terrain.version}:${ox}:${oy}:${cols}:${rows}:${cell}`
+    + `:${world.erasedCount}:${world.built}:${spriteEpoch}`;
+  if (terrain.backgroundKey === key && terrain.background) return terrain.background;
+
+  const pxW = Math.ceil(cols * cell), pxH = Math.ceil(rows * cell);
+  const canvas = terrain.background && terrain.background.width === pxW
+    && terrain.background.height === pxH
+    ? terrain.background
+    : Object.assign(document.createElement("canvas"), { width: pxW, height: pxH });
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  ctx.globalCompositeOperation = "copy";
+  ctx.drawImage(terrainLayer(terrain, world, ox, oy, cols, rows, cell, false), 0, 0);
+  ctx.globalCompositeOperation = "source-over";
+
+  // The masks are one texel per tile over the whole map; inside this canvas the map starts
+  // at the origin tile of the view.
+  const place = { x: -ox * cell, y: (oy + rows - terrain.height) * cell };
+  multiplyMask(ctx, shadowMask(terrain, world), terrain, { cell, place });
+  ctx.drawImage(terrainLayer(terrain, world, ox, oy, cols, rows, cell, true), 0, 0);
+  multiplyMask(ctx, darkMask(terrain), terrain, { cell, place });
+
+  terrain.background = canvas;
+  terrain.backgroundKey = key;
+  return canvas;
 }
 
 /**
@@ -1267,9 +1355,7 @@ function multiplyMask(ctx, mask, terrain, v) {
   ctx.imageSmoothingQuality = "high";
   // Texel centres onto tile centres: mask pixel n describes tile n, and the browser
   // samples from the middle of each.
-  const x = -v.rawX * v.cell;
-  const y = (v.rawY + v.viewH - terrain.height) * v.cell;
-  ctx.drawImage(mask, x, y, terrain.width * v.cell, terrain.height * v.cell);
+  ctx.drawImage(mask, v.place.x, v.place.y, terrain.width * v.cell, terrain.height * v.cell);
   ctx.restore();
 }
 
@@ -1341,26 +1427,12 @@ function drawBlockSprite(ctx, world, tile, b, info, v) {
     return;
   }
 
-  // A turret points where it is aiming, not where it was laid, and slides back when it
-  // fires. Everything else keeps the rotation it was built with.
   const turret = world.turrets.get(tile);
   if (turret) {
-    ctx.translate(turret.rx * cell, -turret.ry * cell);
-    ctx.rotate(-turret.angle * Math.PI / 180);
-  } else if (info.rotate && b.rot) {
-    ctx.rotate(-b.rot * Math.PI / 2);
-  }
-  blit(base, tile);
-
-  if (turret && turret.heat > 2) {
-    // The barrel glows as it heats, which is the only sign a turret is firing when the
-    // shots themselves are too small to see.
-    ctx.save();
-    ctx.globalAlpha = Math.min(1, turret.heat / 100) * 0.8;
-    ctx.globalCompositeOperation = "lighter";
-    const glow = tinted(info.name, "#ff5a3c");
-    if (glow) ctx.drawImage(glow, -span / 2, -span / 2, span, span);
-    ctx.restore();
+    drawTurret(ctx, world, info, turret, { span, cell, blit });
+  } else {
+    if (info.rotate && b.rot) ctx.rotate(-b.rot * Math.PI / 2);
+    blit(base, tile);
   }
 
   const rotator = spriteOf(info.name + "-rotator");
@@ -1421,6 +1493,53 @@ function drawCracks(ctx, tile, b, info, v) {
   const dark = tintedImage(stage, stageImage, "#333");
   if (dark) ctx.drawImage(dark, -span / 2, -span / 2, span, span);
   ctx.restore();
+}
+
+/**
+ * A turret, layered the way `DrawTurret` layers it.
+ *
+ * A plain plate on the ground that never turns, then the barrels underneath sliding back
+ * as they fire, then the head on top pointing where it aims. Drawing the head alone, at
+ * the rotation the block was built with, is why they looked like stamped tiles rather than
+ * machines tracking a target.
+ *
+ * A turret with no region of its own stands on the generic plate for its size, which is
+ * exactly the fallback the engine uses.
+ */
+function drawTurret(ctx, world, info, turret, v) {
+  const { span, cell } = v;
+  const size = info.size || 1;
+
+  const plate = spriteOf(`${info.name}-base`) || spriteOf(`block-${size}`);
+  v.blit(plate);
+
+  ctx.translate(turret.rx * cell, -turret.ry * cell);
+  ctx.rotate(-turret.angle * Math.PI / 180);
+
+  // Barrels are drawn under the head and slide back along its axis. `moveY = -1.5` world
+  // units at full recoil, which is what makes a duo pump one barrel at a time.
+  const recoils = turret.recoils || [0, 0];
+  ["l", "r"].forEach((side, index) => {
+    const barrel = spriteOf(`${info.name}-barrel-${side}`);
+    if (!barrel) return;
+    const image = imageFor(barrel);
+    if (!image) return;
+    const slide = (recoils[index] || 0) * 1.5 / 8 * cell;
+    ctx.drawImage(image, -span / 2, -span / 2 + slide, span, span);
+  });
+
+  v.blit(spriteOf(info.name));
+
+  if (turret.heat > 2) {
+    // The head glows as it heats, which is the only sign a turret is firing when the
+    // shots themselves are a couple of pixels long.
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, turret.heat / 100) * 0.8;
+    ctx.globalCompositeOperation = "lighter";
+    const glow = tinted(info.name, "#ff5a3c");
+    if (glow) ctx.drawImage(glow, -span / 2, -span / 2, span, span);
+    ctx.restore();
+  }
 }
 
 /** Whether anything under this building's footprint is ore, so a drill has work to do. */
@@ -1808,8 +1927,10 @@ function buildCard(match) {
   card.innerHTML = `
     <div class="head"><span class="policy"></span><span class="badge match-id"></span>
       <span class="badge act"></span></div>
-    <div class="join"></div>
-    <canvas class="map"></canvas>
+    <div class="canvas-slot">
+      <div class="join"></div>
+      <canvas class="map"></canvas>
+    </div>
     <div class="bar"><i></i></div>
     <div class="rows">
       <div class="row"><span>${t("step")}</span><span class="f-step"></span></div>
