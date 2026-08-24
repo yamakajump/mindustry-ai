@@ -79,11 +79,41 @@ def sprite_candidates(name: str, variants: int, exact: bool = False) -> list[str
 
 #: Overlays Mindustry draws on top of a block, in the order it draws them.
 #:
-#: A drill is not one sprite. The base is drawn, then the rotating bit, then a translucent
-#: top. Drawing only the base gives a hole where the machine should be.
+#: A drill is not one sprite. The base is drawn, then the bit spinning on top of it, then a
+#: translucent housing. Drawing only the base gives a machine that never moves.
 BLOCK_OVERLAYS = {
-    "mechanical-drill": ("mechanical-drill-top",),
+    "mechanical-drill": ("mechanical-drill-rotator", "mechanical-drill-top"),
 }
+
+#: Items that ride on belts, drawn as they travel.
+#:
+#: Only the ones the early curriculum actually produces. The full set is thirty-odd and
+#: most of them cannot exist on a map the agent can reach yet.
+#: The ring drawn behind the ore a unit carries on its back.
+UI_SPRITES = ("ring-item",)
+
+#: Damage cracks, one sheet per block size and eight stages of ruin.
+#:
+#: The engine picks a stage from the health left and lays it over the block. Only sizes one
+#: to three are packed: nothing the agent can build is larger, and the core is three.
+CRACK_SIZES = 3
+CRACK_STAGES = 8
+
+ITEM_SPRITES = (
+    "item-copper", "item-lead", "item-sand", "item-coal", "item-scrap",
+    "item-graphite", "item-silicon", "item-titanium", "item-metaglass",
+)
+
+#: The team-coloured cell on a unit, which is how its side is read at a glance.
+#:
+#: Units without one of their own fall back to `power-cell`, exactly as the engine does.
+UNIT_CELL_FALLBACK = "power-cell"
+
+#: A conveyor is twenty sprites: five shapes for how it connects to its neighbours, four
+#: animation frames each. Packing one of them and rotating it is why a belt looks like a
+#: painted arrow rather than something carrying items.
+CONVEYOR_SHAPES = 5
+CONVEYOR_FRAMES = 4
 
 
 def edge_name(name: str) -> str:
@@ -132,10 +162,33 @@ def build(jar: Path, wanted: dict[str, int], out_dir: Path) -> dict:
                 if image is not None:
                     found[overlay] = [image]
 
+            if exact:
+                cell = load(f"{name}-cell") or load(UNIT_CELL_FALLBACK)
+                if cell is not None:
+                    found[f"{name}-cell"] = [cell]
+
+            # A block may carry a team-coloured overlay, drawn over it in the team colour.
+            team = load(f"{name}-team")
+            if team is not None:
+                found[f"{name}-team"] = [team]
+
+            if name == "conveyor":
+                for shape in range(CONVEYOR_SHAPES):
+                    frames = [load(f"conveyor-{shape}-{frame}") for frame in range(CONVEYOR_FRAMES)]
+                    frames = [f for f in frames if f is not None]
+                    if frames:
+                        found[f"conveyor-{shape}"] = frames
+
             for extra in (edge_name(name), large_name(name)):
                 sheet = load(extra)
                 if sheet is not None:
                     found[extra] = [sheet]
+
+        for size in range(1, CRACK_SIZES + 1):
+            stages = [load(f"cracks-{size}-{i}") for i in range(CRACK_STAGES)]
+            stages = [s for s in stages if s is not None]
+            if stages:
+                found[f"cracks-{size}"] = stages
 
     if not found:
         raise SystemExit("no sprites matched, is the jar correct?")
@@ -201,7 +254,7 @@ def wanted_from_replays(replays: list[Path]) -> dict[str, int]:
 
 def wanted_for_live(blocks: tuple[str, ...]) -> dict[str, int]:
     """Everything the live dashboard draws, replays or not."""
-    wanted = {name: 0 for name in LIVE_SPRITES}
+    wanted = {name: 0 for name in LIVE_SPRITES + ITEM_SPRITES + UI_SPRITES}
     for name in blocks:
         wanted.setdefault(name, 0)
     return wanted

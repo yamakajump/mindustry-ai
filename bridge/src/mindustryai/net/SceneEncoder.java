@@ -9,6 +9,8 @@ import mindustry.gen.Unit;
 import mindustry.world.Block;
 import mindustry.world.Tile;
 import mindustry.world.blocks.ConstructBlock;
+import mindustry.world.blocks.defense.turrets.Turret;
+import mindustry.world.blocks.distribution.Conveyor;
 
 /**
  * A frame of everything that moves, so a viewer can animate the match instead of drawing
@@ -39,7 +41,7 @@ import mindustry.world.blocks.ConstructBlock;
 public class SceneEncoder {
 
     /** Values per unit record. */
-    public static final int UNIT_STRIDE = 9;
+    public static final int UNIT_STRIDE = 11;
 
     /** Values per placed-building record. */
     public static final int BUILD_STRIDE = 6;
@@ -73,6 +75,9 @@ public class SceneEncoder {
     /** Unit type ids whose name has already been sent. */
     private final IntSet knownTypes = new IntSet();
 
+    /** Item ids whose name has already been sent. */
+    private final IntSet knownItems = new IntSet();
+
     private int sequence;
 
     /**
@@ -86,6 +91,7 @@ public class SceneEncoder {
         units.clear();
         knownBlocks.clear();
         knownTypes.clear();
+        knownItems.clear();
         sequence = 0;
     }
 
@@ -97,6 +103,14 @@ public class SceneEncoder {
      *     whenever two of them are close, and lose the camera every time it did.
      */
     public Jval encode(int agentId) {
+        return encode(agentId, null);
+    }
+
+    /**
+     * @param deposit an item handover to animate, or null. The engine plays an effect for
+     *     these and a headless server draws nothing, so the fact travels instead.
+     */
+    public Jval encode(int agentId, PlayerAgent.Deposit deposit) {
         Jval scene = Jval.newObject();
         scene.put("ok", true);
         scene.put("seq", ++sequence);
@@ -117,17 +131,35 @@ public class SceneEncoder {
 
         Jval newBlocks = Jval.newObject();
         Jval newTypes = Jval.newObject();
+        Jval newItems = Jval.newObject();
 
         scene.put("units", encodeUnits(newTypes));
         scene.put("gone", takeDepartedUnits());
         encodeBuildings(scene, newBlocks);
         scene.put("shots", encodeShots());
+        scene.put("belts", encodeBelts(newItems));
+        scene.put("turrets", encodeTurrets());
+
+        if (deposit != null) {
+            describeItem(Vars.content.item(deposit.item()), newItems);
+            Jval banked = Jval.newArray();
+            add(banked, round(deposit.x()));
+            add(banked, round(deposit.y()));
+            add(banked, round(deposit.toX()));
+            add(banked, round(deposit.toY()));
+            add(banked, deposit.item());
+            add(banked, deposit.amount());
+            scene.put("deposit", banked);
+        }
 
         if (newBlocks.asObject().size > 0) {
             scene.put("blocks", newBlocks);
         }
         if (newTypes.asObject().size > 0) {
             scene.put("types", newTypes);
+        }
+        if (newItems.asObject().size > 0) {
+            scene.put("items", newItems);
         }
         return scene;
     }
@@ -165,15 +197,40 @@ public class SceneEncoder {
             add(array, percent(unit.health(), unit.maxHealth()));
             add(array, flags);
             add(array, mineTile);
+            // What it is carrying, so the viewer can draw the ore on its back and the
+            // count beside it, which is how a player reads a mining run at a glance.
+            add(array, unit.stack.item == null || unit.stack.amount == 0 ? -1 : unit.stack.item.id);
+            add(array, unit.stack.amount);
         });
 
         return array;
     }
 
     private void describeType(Unit unit, Jval newTypes) {
-        if (knownTypes.add(unit.type.id)) {
-            newTypes.put(String.valueOf(unit.type.id), unit.type.name);
+        if (!knownTypes.add(unit.type.id)) {
+            return;
         }
+        Jval entry = Jval.newObject();
+        entry.put("name", unit.type.name);
+        // A flying unit throws its shadow a tile and a half away, a walking one keeps it
+        // underfoot. Getting that wrong is what makes a drawn unit sit on the ground when
+        // it is meant to be hovering over it.
+        entry.put("flying", unit.type.flying);
+        entry.put("size", unit.hitSize / Vars.tilesize);
+        entry.put("item_offset", unit.type.itemOffsetY / Vars.tilesize);
+        entry.put("item_size", Vars.itemSize / Vars.tilesize);
+
+        // Engine positions, so the flames sit where the engine put them rather than
+        // somewhere plausible behind the sprite.
+        Jval engines = Jval.newArray();
+        for (var engine : unit.type.engines) {
+            add(engines, engine.x / Vars.tilesize);
+            add(engines, engine.y / Vars.tilesize);
+            add(engines, engine.radius / Vars.tilesize);
+            add(engines, engine.rotation);
+        }
+        entry.put("engines", engines);
+        newTypes.put(String.valueOf(unit.type.id), entry);
     }
 
     /** Ids that were in the previous frame and are not in this one. */
@@ -286,7 +343,102 @@ public class SceneEncoder {
         entry.put("name", block.name);
         entry.put("size", block.size);
         entry.put("rotate", block.rotate);
+        entry.put("shadow", block.hasShadow);
         newBlocks.put(String.valueOf(block.id), entry);
+    }
+
+    // Belts ---------------------------------------------------------------------------
+
+    /**
+     * Conveyors, with the shape they wear and the items riding on them.
+     *
+     * <p>Sent whole every frame rather than as a delta, because a belt is nothing but
+     * movement: every item on it has a new position each tick, so a delta would be the
+     * same size as the thing itself.
+     *
+     * <p>The shape comes from the engine rather than being worked out again on the other
+     * side. {@code blendbits} is the autotiler's own answer to how this belt meets its
+     * neighbours, and reimplementing that decision is how a viewer ends up drawing a
+     * junction where the game draws a straight run.
+     *
+     * <p>Layout per belt: {@code [tile, blendbits, scaleY, count, (item, x, y) * count]}.
+     */
+    private Jval encodeBelts(Jval newItems) {
+        Jval array = Jval.newArray();
+
+        Groups.build.each(building -> {
+            if (!(building instanceof Conveyor.ConveyorBuild belt)) {
+                return;
+            }
+            Tile tile = building.tile;
+            if (tile == null || tile.build != building) {
+                return;
+            }
+
+            add(array, tile.y * Vars.world.width() + tile.x);
+            add(array, belt.blendbits);
+            add(array, belt.blendscly);
+            add(array, belt.len);
+
+            for (int i = 0; i < belt.len; i++) {
+                var item = belt.ids[i];
+                if (item == null) {
+                    add(array, -1);
+                    add(array, 0);
+                    add(array, 0);
+                    continue;
+                }
+                describeItem(item, newItems);
+                add(array, item.id);
+                add(array, round(belt.xs[i]));
+                add(array, round(belt.ys[i]));
+            }
+        });
+
+        return array;
+    }
+
+    /** An item's name and its colour, which is what its mining sparks are tinted with. */
+    private void describeItem(mindustry.type.Item item, Jval newItems) {
+        if (item == null || !knownItems.add(item.id)) {
+            return;
+        }
+        Jval entry = Jval.newObject();
+        entry.put("name", item.name);
+        entry.put("color", "#" + item.color.toString().substring(0, 6));
+        newItems.put(String.valueOf(item.id), entry);
+    }
+
+    // Turrets -------------------------------------------------------------------------
+
+    /**
+     * Where each turret is pointing, and how hard it just kicked.
+     *
+     * <p>A turret is the one building whose sprite does not sit still: it tracks a target
+     * independently of the direction it was placed in, and recoils when it fires. Drawing
+     * it at its build rotation makes a defence line look painted on.
+     *
+     * <p>Layout per turret: {@code [tile, angle, recoilX, recoilY, heat]}.
+     */
+    private Jval encodeTurrets() {
+        Jval array = Jval.newArray();
+
+        Groups.build.each(building -> {
+            if (!(building instanceof Turret.TurretBuild turret)) {
+                return;
+            }
+            Tile tile = building.tile;
+            if (tile == null || tile.build != building) {
+                return;
+            }
+            add(array, tile.y * Vars.world.width() + tile.x);
+            add(array, Math.round(turret.drawrot()));
+            add(array, round(turret.recoilOffset.x / Vars.tilesize));
+            add(array, round(turret.recoilOffset.y / Vars.tilesize));
+            add(array, clamp(Math.round(turret.heat * 100)));
+        });
+
+        return array;
     }
 
     // Shots ---------------------------------------------------------------------------

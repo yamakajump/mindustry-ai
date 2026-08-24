@@ -125,10 +125,11 @@
   .legend { display: grid; gap: 5px; font-size: 12.5px; }
   .legend div { display: flex; align-items: center; gap: var(--s2); color: var(--muted); }
   .key { width: 14px; height: 14px; border-radius: 3px; flex: none; display: grid; place-items: center; }
-  .key.ally { background: rgba(121,192,255,.2); border: 1.5px solid var(--ally); border-radius: 50%; }
-  .key.enemy { background: rgba(255,123,114,.2); border: 1.5px solid var(--enemy); }
+  /* The team colours the engine itself uses, so the legend matches the map. */
+  .key.ally { background: #ffd37f; border-radius: 50%; }
+  .key.enemy { background: #f25555; border-radius: 50%; }
   .key.built { background: rgba(255,207,107,.25); border: 1.5px solid var(--accent); }
-  .key.wip { background: repeating-linear-gradient(45deg, transparent, transparent 3px, var(--accent) 3px, var(--accent) 5px); border: 1.5px dashed var(--accent); }
+  .key.wip { background: linear-gradient(0deg, var(--accent) 55%, rgba(255,207,107,.18) 55%); border: 1px solid var(--accent); }
 
   table.gens { width: 100%; border-collapse: collapse; font-size: 12.5px; }
   table.gens th { text-align: left; color: var(--faint); font-weight: 600; font-size: 10px;
@@ -292,9 +293,10 @@ const STRINGS = {
     joinInGame:"Join in Mindustry:", versions:"Saved versions", replays:"Replays",
     noVersions:"no version saved yet", noReplays:"no replay recorded yet",
     legend:"What you are looking at",
-    legendAlly:"the agent and its allies", legendEnemy:"enemies arriving in waves",
+    legendAlly:"the agent and its allies, marked by a yellow cell",
+    legendEnemy:"enemies arriving in waves, marked red",
     legendBuilt:"buildings, drawn with the game sprites",
-    legendWip:"under construction, hatched until finished",
+    legendWip:"under construction, filling in as it is built",
     lede:"Every panel below is one match being played right now. The agent flies, mines, builds and defends under the same rules a player has. It gets a little better every <b>generation</b>, and each generation worth keeping is saved as a version you can replay.",
     curveHint:"Reward per generation. Rising means the agent is learning; exploration falling to zero means it stopped trying new things.",
     versionHint:"Best is chosen on the average across a generation, not on one lucky episode.",
@@ -314,9 +316,10 @@ const STRINGS = {
     joinInGame:"Rejoindre dans Mindustry :", versions:"Versions sauvegardées", replays:"Replays",
     noVersions:"aucune version sauvegardée", noReplays:"aucun replay enregistré",
     legend:"Ce que tu regardes",
-    legendAlly:"l'agent et ses alliés", legendEnemy:"les ennemis qui arrivent en vagues",
+    legendAlly:"l'agent et ses alliés, cellule jaune",
+    legendEnemy:"les ennemis qui arrivent en vagues, en rouge",
     legendBuilt:"les bâtiments, avec les sprites du jeu",
-    legendWip:"en construction, hachuré tant que ce n'est pas fini",
+    legendWip:"en construction, se remplit au fur et à mesure",
     lede:"Chaque panneau ci-dessous est une partie jouée en ce moment. L'agent vole, mine, construit et se défend avec les mêmes règles qu'un joueur. Il s'améliore un peu à chaque <b>génération</b>, et chaque génération qui vaut le coup est sauvegardée en version rejouable.",
     curveHint:"Récompense par génération. Ça monte, il apprend. L'exploration qui tombe à zéro veut dire qu'il n'essaie plus rien de neuf.",
     versionHint:"La meilleure est choisie sur la moyenne d'une génération, pas sur un épisode chanceux.",
@@ -438,19 +441,27 @@ class World {
     this.version = 0;
     this.units = new Map();       // id -> {type, team, x, y, rot, hp, flags, fx, fy, frot}
     this.buildings = new Map();   // tile -> {block, rot, team, hp, prog, bornAt, doneAt, hurtAt}
-    this.dying = new Map();       // tile -> {at, block}
+    this.effects = new Effects();
     this.shots = [];
-    this.blocks = {}; this.types = {};
+    this.belts = new Map();          // tile -> {bits, flip, items}
+    this.turrets = new Map();        // tile -> {angle, rx, ry, heat}
+    this.blocks = {}; this.types = {}; this.itemNames = {};
     this.erased = new Set(); this.erasedCount = 0;
     this.agentId = -1;
-    this.tick = 0; this.wave = 0; this.waveTime = 0; this.enemies = 0;
+    this.tick = 0; this.fromTick = 0;
+    this.wave = 0; this.waveTime = 0; this.enemies = 0;
+    //: Bumped whenever a building appears or vanishes, so the shadow mask is rebuilt
+    //: then and not on every frame.
+    this.built = 0;
     this.width = 0; this.height = 0;
     this.frameAt = 0; this.interval = 200;
   }
 
   reset() {
-    this.units.clear(); this.buildings.clear(); this.dying.clear();
+    this.units.clear(); this.buildings.clear(); this.effects.list.length = 0;
     this.erased.clear(); this.erasedCount++; this.shots = [];
+    this.belts.clear();
+    this.turrets.clear();
     this.version = 0;
   }
 
@@ -461,11 +472,21 @@ class World {
     }
     this.version = data.version;
     this.agentId = data.agent === undefined ? -1 : data.agent;
+    this.fromTick = this.tick;
     this.tick = data.tick; this.wave = data.wave;
     this.waveTime = data.wave_time; this.enemies = data.enemies;
     this.width = data.width; this.height = data.height;
     Object.assign(this.blocks, data.blocks || {});
     Object.assign(this.types, data.types || {});
+    Object.assign(this.itemNames, data.items || {});
+    this.readBelts(data.belts || []);
+    this.turrets.clear();
+    const turrets = data.turrets || [];
+    for (let i = 0; i + 4 < turrets.length; i += 5) {
+      this.turrets.set(turrets[i], {
+        angle: turrets[i + 1], rx: turrets[i + 2], ry: turrets[i + 3], heat: turrets[i + 4],
+      });
+    }
 
     // Frames arrive on a wall clock, not a fixed one, so the gap between the last two is
     // the only honest guess at how long the next one has to be stretched over.
@@ -474,16 +495,20 @@ class World {
 
     const seen = new Set();
     const u = data.units || [];
-    for (let i = 0; i + 8 < u.length; i += 9) {
+    const stride = 11;
+    for (let i = 0; i + stride - 1 < u.length; i += stride) {
       const id = u[i];
       seen.add(id);
       const previous = this.units.get(id);
       this.units.set(id, {
         type: u[i + 1], team: u[i + 2], x: u[i + 3], y: u[i + 4],
         rot: u[i + 5], hp: u[i + 6], flags: u[i + 7], mine: u[i + 8],
+        item: u[i + 9], stack: u[i + 10],
         fx: previous ? previous.x : u[i + 3],
         fy: previous ? previous.y : u[i + 4],
         frot: previous ? previous.rot : u[i + 5],
+        // Carried over so the mining sparks keep their cadence across frames.
+        mineAt: previous ? previous.mineAt : 0,
         seenAt: now,
       });
     }
@@ -503,19 +528,31 @@ class World {
       };
       // A finished building gets one flash. Without the guard every delta would retrigger
       // it and the whole base would strobe.
-      if (prog >= 100 && (!previous || previous.prog < 100)) entry.doneAt = now;
+      if (prog >= 100 && (!previous || previous.prog < 100)) {
+        entry.doneAt = now;
+        if (previous) this.placeEffect("place", tile, entry.block, 16);
+      }
       if (previous && placed[i + 4] < previous.hp) entry.hurtAt = now;
+      if (!previous) this.built++;
       this.buildings.set(tile, entry);
-      this.dying.delete(tile);
     }
 
     for (const tile of data.removed || []) {
       const gone = this.buildings.get(tile);
+      this.placeEffect("break", tile, gone ? gone.block : 0, 12);
       this.buildings.delete(tile);
-      this.dying.set(tile, { at: now, block: gone ? gone.block : 0 });
+      this.built++;
       // Map blocks live in the terrain layer, so a destroyed one has to be painted out
       // of it or the rubble keeps standing.
       if (!this.erased.has(tile)) { this.erased.add(tile); this.erasedCount++; }
+    }
+
+    for (const d of data.deposits || []) {
+      const item = this.itemNames[String(d[4])];
+      this.effects.add("transfer", 12, {
+        x: d[0], y: d[1], toX: d[2], toY: d[3],
+        color: item ? item.color : "#d99d73",
+      });
     }
 
     const shots = data.shots || [];
@@ -525,9 +562,39 @@ class World {
     }
   }
 
-  /** Drop the corpses and flashes that have finished playing. */
+  /** The square that opens outward when a block is finished or knocked down. */
+  placeEffect(kind, tile, block, life) {
+    const info = this.blocks[String(block)];
+    this.effects.add(kind, life, {
+      x: tile % this.width, y: Math.floor(tile / this.width),
+      size: info ? (info.size || 1) : 1,
+    });
+  }
+
+  /**
+   * Unpack the belts, which arrive whole rather than as a delta.
+   *
+   * Layout per belt: tile, the autotiler shape, the vertical mirror, how many items are
+   * on it, then a triple per item. Flat because the alternative is an object per item per
+   * frame, and a busy base has hundreds of them.
+   */
+  readBelts(flat) {
+    this.belts.clear();
+    let i = 0;
+    while (i + 3 < flat.length) {
+      const tile = flat[i], bits = flat[i + 1], flip = flat[i + 2], count = flat[i + 3];
+      i += 4;
+      const items = [];
+      for (let n = 0; n < count && i + 2 < flat.length; n++, i += 3) {
+        if (flat[i] >= 0) items.push([flat[i], flat[i + 1], flat[i + 2]]);
+      }
+      this.belts.set(tile, { bits, flip, items });
+    }
+  }
+
+  /** Drop the effects that have finished playing. */
   sweep(now) {
-    for (const [tile, entry] of this.dying) if (now - entry.at > 500) this.dying.delete(tile);
+    this.effects.sweep(now);
   }
 }
 
@@ -556,6 +623,277 @@ async function pollScene(index) {
 const FALLBACK = { floor: "#1b1b24", solid: "#2e2e3c", built: "#ffcf6b" };
 const TEAM_SHARDED = 1;   // The agent's own team on every map used here.
 
+/** Team colours, taken from the engine so a side reads the same as it does in game. */
+const TEAM_COLOUR = { 0: "#4d4e58", 1: "#ffd37f", 2: "#f25555", 3: "#54d67d", 4: "#7dcbf0" };
+const teamColour = id => TEAM_COLOUR[id] || "#c0c0c8";
+
+/** Pal.shadow, and the grey a shadowed tile is multiplied by. */
+const SHADOW_ALPHA = 0.22;
+const SHADOW_LEVEL = 1 - 0.71;
+
+/** How deep inside a rock mass a tile can be before it is fully black. */
+const DARK_RADIUS = 4;
+
+/** East, north, west, south: the engine's rotation order. */
+const D4 = [[1, 0], [0, 1], [-1, 0], [0, -1]];
+
+/** Ticks per animation frame of a belt: its speed times the eight frames per unit time. */
+const CONVEYOR_RATE = 0.03 * 8;
+
+/** How fast a mechanical drill turns its bit, in degrees per tick. */
+const DRILL_ROTATE = 2;
+
+/**
+ * Item colours, straight from the engine's own content definitions.
+ *
+ * Used to tint the chips thrown off a tile being mined. They are constants in the game, so
+ * they are constants here rather than another field on the wire.
+ */
+const ITEM_COLOUR = {
+  copper: "#d99d73", lead: "#8c7fa9", metaglass: "#ebeef5", graphite: "#b2c6d2",
+  sand: "#f7cba4", coal: "#272727", titanium: "#8da1e3", thorium: "#f9a3c7",
+  scrap: "#777777", silicon: "#53565c",
+};
+
+/** The ore an overlay block yields: `ore-copper` gives copper, and sand comes from sand. */
+function oreColour(name) {
+  if (!name) return "#d99d73";
+  const item = name.startsWith("ore-") ? name.slice(4) : name;
+  return ITEM_COLOUR[item] || "#d99d73";
+}
+
+/** arc's Mathf.absin: a sine that stays between zero and mag. */
+const absin = (t, scl, mag) => (Math.sin(t / scl) + 1) / 2 * mag;
+
+/** Pal.accent and Pal.remove, the two colours the engine builds and breaks things in. */
+const PAL_ACCENT = "255,211,127", PAL_REMOVE = "229,84,84";
+
+/** A tick at sixty a second, in milliseconds, which is what effect lifetimes are given in. */
+const TICK_MS = 1000 / 60;
+
+/**
+ * The transient effects the engine plays and a headless server never draws.
+ *
+ * Reproduced from their definitions rather than invented: `Fx.mine` is six squares thrown
+ * outward over twenty ticks, `Fx.itemTransfer` is a dot arcing to its destination over
+ * twelve, `Fx.placeBlock` is a square opening outward over sixteen. Getting the timings
+ * and the shapes right is the difference between a base that works and a base that looks
+ * like it is working.
+ */
+class Effects {
+  constructor() { this.list = []; }
+
+  add(kind, life, fields) {
+    this.list.push({ kind, life: life * TICK_MS, at: performance.now(), id: Effects.next++, ...fields });
+    // A hard ceiling: a base under fire can spawn faster than they expire, and an
+    // unbounded list is a memory leak that shows up as a slowly dying dashboard.
+    if (this.list.length > 400) this.list.splice(0, this.list.length - 400);
+  }
+
+  sweep(now) {
+    let kept = 0;
+    for (const e of this.list) if (now - e.at < e.life) this.list[kept++] = e;
+    this.list.length = kept;
+  }
+}
+Effects.next = 1;
+
+/** A small seeded generator, so an effect looks the same on every frame of its life. */
+function seeded(seed) {
+  let s = seed >>> 0 || 1;
+  return () => {
+    s ^= s << 13; s >>>= 0;
+    s ^= s >> 17;
+    s ^= s << 5; s >>>= 0;
+    return s / 4294967296;
+  };
+}
+
+/** arc's randLenVectors: n offsets at seeded angles, out to a seeded fraction of length. */
+function randLenVectors(seed, count, length, each) {
+  const rand = seeded(seed);
+  for (let i = 0; i < count; i++) {
+    const l = rand() * length;
+    const a = rand() * Math.PI * 2;
+    each(Math.cos(a) * l, Math.sin(a) * l);
+  }
+}
+
+/**
+ * A sprite recoloured once and kept.
+ *
+ * Team cells and unit shadows are the same handful of sprites in the same handful of
+ * colours, frame after frame. Compositing them per unit per frame is the kind of cost
+ * that turns six live matches into a slideshow, so each combination is drawn once into
+ * its own little canvas and blitted from then on.
+ */
+const tintCache = new Map();
+function tinted(name, colour) {
+  return tintedFrame(name, spriteOf(name), colour);
+}
+
+function tintedFrame(name, s, colour) {
+  const key = `${name}|${s ? s.x : "-"}|${s ? s.y : "-"}|${colour}`;
+  const known = tintCache.get(key);
+  if (known !== undefined) return known;
+
+  if (!s || !atlas) { tintCache.set(key, null); return null; }
+
+  const canvas = Object.assign(document.createElement("canvas"), { width: s.w, height: s.h });
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(atlas, s.x, s.y, s.w, s.h, 0, 0, s.w, s.h);
+  ctx.globalCompositeOperation = "source-in";
+  ctx.fillStyle = colour;
+  ctx.fillRect(0, 0, s.w, s.h);
+  tintCache.set(key, canvas);
+  return canvas;
+}
+
+/**
+ * How dark each tile is, as the engine computes it.
+ *
+ * Two things darken a tile. It sits deep inside a mass of natural rock, measured as the
+ * Manhattan distance to the nearest tile that is not rock, which is what gives cliffs
+ * their black interiors instead of a flat grey field. Or it is within two tiles of the
+ * edge of the map, which fades the border out rather than cutting it off.
+ *
+ * Computed once when a map arrives: it is a breadth-first sweep over every tile, and it
+ * cannot change without the terrain changing.
+ */
+function computeDarkness(terrain) {
+  const { width: w, height: h } = terrain;
+  const dark = new Uint8Array(w * h);
+  const queue = new Int32Array(w * h);
+  let head = 0, tail = 0;
+
+  const solid = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    const entry = terrain.palette[String(terrain.block[i])];
+    solid[i] = entry && entry.dark ? 1 : 0;
+    if (!solid[i]) queue[tail++] = i;      // Every open tile is a source at distance zero.
+  }
+
+  const distance = new Uint8Array(w * h).fill(255);
+  for (let i = 0; i < tail; i++) distance[queue[i]] = 0;
+
+  while (head < tail) {
+    const i = queue[head++];
+    const d = distance[i];
+    if (d >= DARK_RADIUS + 1) continue;
+    const x = i % w, y = (i / w) | 0;
+    if (x > 0 && distance[i - 1] === 255) { distance[i - 1] = d + 1; queue[tail++] = i - 1; }
+    if (x < w - 1 && distance[i + 1] === 255) { distance[i + 1] = d + 1; queue[tail++] = i + 1; }
+    if (y > 0 && distance[i - w] === 255) { distance[i - w] = d + 1; queue[tail++] = i - w; }
+    if (y < h - 1 && distance[i + w] === 255) { distance[i + w] = d + 1; queue[tail++] = i + w; }
+  }
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      let value = solid[i] ? Math.max(0, Math.min(255, distance[i]) - 1) : 0;
+      const edge = Math.min(x, y, w - 1 - x, h - 1 - y);
+      if (edge <= 2) value = Math.max(value, (2 - edge) * 2);
+      dark[i] = value;
+    }
+  }
+  return dark;
+}
+
+/** The grey a tile is multiplied by for its darkness value, straight from the engine. */
+const darknessLevel = value => value > 0 ? 1 - Math.min((value + 0.5) / 4, 1) : 1;
+
+/** A one-texel-per-tile greyscale canvas, reused across rebuilds. */
+function maskCanvas(terrain, field, w, h) {
+  if (!terrain[field] || terrain[field].width !== w) {
+    terrain[field] = Object.assign(document.createElement("canvas"), { width: w, height: h });
+  }
+  return terrain[field];
+}
+
+/**
+ * The soft shadow everything on the map sits on.
+ *
+ * Mindustry does not draw a shadow per block. It fills one texel per tile, white where
+ * nothing stands and a dark grey where something does, then stretches that over the world
+ * with linear filtering and multiplies it in. The stretch is the whole trick: it turns a
+ * grid of squares into the soft pool of shade around every wall and building, and it costs
+ * a single blit however large the base grows.
+ *
+ * Rebuilt when a building appears or vanishes, which is a few times a second at worst,
+ * never per frame.
+ */
+function shadowMask(terrain, world) {
+  const { width: w, height: h } = terrain;
+  const key = `${terrain.version}:${world.built}:${world.erasedCount}`;
+  if (terrain.shadowKey === key && terrain.shadow) return terrain.shadow;
+
+  const canvas = maskCanvas(terrain, "shadow", w, h);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  const image = ctx.createImageData(w, h);
+  const data = image.data;
+  const grey = Math.round(SHADOW_LEVEL * 255);
+
+  // Row zero of the mask is the top of the screen, so the world is flipped into it.
+  const put = (x, y, value) => {
+    const p = ((h - 1 - y) * w + x) * 4;
+    data[p] = data[p + 1] = data[p + 2] = value;
+    data[p + 3] = 255;
+  };
+
+  for (let i = 0; i < w * h; i++) {
+    const entry = terrain.palette[String(terrain.block[i])];
+    const casts = entry && entry.shadow && !world.erased.has(i);
+    put(i % w, (i / w) | 0, casts ? grey : 255);
+  }
+
+  for (const [tile, b] of world.buildings) {
+    const info = world.blocks[String(b.block)];
+    if (info && info.shadow === false) continue;
+    const size = info ? (info.size || 1) : 1;
+    const offset = Math.floor((size - 1) / 2);
+    const bx = (tile % w) - offset, by = ((tile / w) | 0) - offset;
+    for (let dy = 0; dy < size; dy++) {
+      for (let dx = 0; dx < size; dx++) {
+        const x = bx + dx, y = by + dy;
+        if (x >= 0 && y >= 0 && x < w && y < h) put(x, y, grey);
+      }
+    }
+  }
+
+  ctx.putImageData(image, 0, 0);
+  terrain.shadowKey = key;
+  return canvas;
+}
+
+/**
+ * The darkness over the map: black inside rock, faded at the border.
+ *
+ * Separate from the shadow because it is drawn last, over everything including units,
+ * whereas the shadow goes under them. It also never changes once the map is loaded, so it
+ * is built once and kept.
+ */
+function darkMask(terrain) {
+  const { width: w, height: h } = terrain;
+  if (terrain.darkKey === terrain.version && terrain.dark) return terrain.dark;
+
+  if (!terrain.darkness) terrain.darkness = computeDarkness(terrain);
+  const canvas = maskCanvas(terrain, "dark", w, h);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  const image = ctx.createImageData(w, h);
+  const data = image.data;
+
+  for (let i = 0; i < w * h; i++) {
+    const p = ((h - 1 - ((i / w) | 0)) * w + (i % w)) * 4;
+    const value = Math.round(darknessLevel(terrain.darkness[i]) * 255);
+    data[p] = data[p + 1] = data[p + 2] = value;
+    data[p + 3] = 255;
+  }
+
+  ctx.putImageData(image, 0, 0);
+  terrain.darkKey = terrain.version;
+  return canvas;
+}
+
 /**
  * Paint floors, ores and static map blocks once into an offscreen canvas.
  *
@@ -563,18 +901,22 @@ const TEAM_SHARDED = 1;   // The agent's own team on every map used here.
  * unwatchable. The ground does not move, so it is painted when the view or the map
  * changes and blitted the rest of the time.
  */
-function terrainLayer(terrain, world, ox, oy, cols, rows, cell) {
+function terrainLayer(terrain, world, ox, oy, cols, rows, cell, walls) {
+  const slot = walls ? "wallLayer" : "floorLayer";
   const key = `${terrain.version}:${ox}:${oy}:${cols}:${rows}:${cell}:${world.erasedCount}`;
-  if (terrain.layerKey === key && terrain.layer) return terrain.layer;
+  if (terrain[slot + "Key"] === key && terrain[slot]) return terrain[slot];
 
   const pxW = Math.ceil(cols * cell), pxH = Math.ceil(rows * cell);
-  const layer = terrain.layer && terrain.layer.width === pxW && terrain.layer.height === pxH
-    ? terrain.layer
+  const layer = terrain[slot] && terrain[slot].width === pxW && terrain[slot].height === pxH
+    ? terrain[slot]
     : Object.assign(document.createElement("canvas"), { width: pxW, height: pxH });
   const ctx = layer.getContext("2d");
   ctx.imageSmoothingEnabled = false;
-  ctx.fillStyle = "#05050a";
-  ctx.fillRect(0, 0, pxW, pxH);
+  ctx.clearRect(0, 0, pxW, pxH);
+  if (!walls) {
+    ctx.fillStyle = "#05050a";
+    ctx.fillRect(0, 0, pxW, pxH);
+  }
 
   const { width: mapW, height: mapH } = terrain;
   const top = oy + rows - 1;
@@ -672,15 +1014,18 @@ function terrainLayer(terrain, world, ox, oy, cols, rows, cell) {
   for (let y = Math.max(0, oy); y <= Math.min(mapH - 1, oy + rows - 1); y++) {
     for (let x = Math.max(0, ox); x <= Math.min(mapW - 1, ox + cols - 1); x++) {
       const i = y * mapW + x;
-      paint(terrain.floor[i], x, y, i, FALLBACK.floor);
-      if (blending) blend(x, y);
-      if (terrain.overlay[i]) paint(terrain.overlay[i], x, y, i * 31 + 7, null);
-      if (terrain.block[i] && !world.erased.has(i)) paintWall(terrain.block[i], x, y, i);
+      if (walls) {
+        if (terrain.block[i] && !world.erased.has(i)) paintWall(terrain.block[i], x, y, i);
+      } else {
+        paint(terrain.floor[i], x, y, i, FALLBACK.floor);
+        if (blending) blend(x, y);
+        if (terrain.overlay[i]) paint(terrain.overlay[i], x, y, i * 31 + 7, null);
+      }
     }
   }
 
-  terrain.layer = layer;
-  terrain.layerKey = key;
+  terrain[slot] = layer;
+  terrain[slot + "Key"] = key;
   return layer;
 }
 
@@ -782,25 +1127,49 @@ function drawMatch(canvas, match, terrain, world, zoom, now) {
   // moves smoothly without the map being repainted every frame.
   const ox = Math.floor(rawX), oy = Math.floor(rawY);
   const cols = Math.ceil(viewW) + 2, rows = Math.ceil(viewH) + 2;
-  const layer = terrainLayer(terrain, world, ox, oy, cols, rows, cell);
   const blitX = (ox - rawX) * cell, blitY = (rawY + viewH - oy - rows) * cell;
-  ctx.drawImage(layer, zoom ? Math.round(blitX) : blitX, zoom ? Math.round(blitY) : blitY);
+  const bx = zoom ? Math.round(blitX) : blitX, by = zoom ? Math.round(blitY) : blitY;
 
   // World y points up, the canvas points down, hence the flip in `sy`.
   const sx = wx => (wx - rawX) * cell;
   const sy = wy => (rawY + viewH - 1 - wy) * cell;
 
-  drawBuildings(ctx, world, { ox, oy, cols, rows, cell, sx, sy, now });
-  drawWrecks(ctx, world, { cell, sx, sy, now });
-  drawUnits(ctx, world, { cell, sx, sy, now, alpha });
-  drawShots(ctx, world, { cell, sx, sy });
+  // The order the engine draws in, and it is the order that matters: the shadow lies on
+  // the ground, everything solid stands on top of it, and the darkness closes over the
+  // lot. Painting the shadow last would put a grey film over the whole picture.
+  ctx.drawImage(terrainLayer(terrain, world, ox, oy, cols, rows, cell, false), bx, by);
+  multiplyMask(ctx, shadowMask(terrain, world), terrain, { rawX, rawY, viewH, cell, width, height });
+  ctx.drawImage(terrainLayer(terrain, world, ox, oy, cols, rows, cell, true), bx, by);
 
-  if (match.core[0] >= 0) {
-    const cx = sx(match.core[0]) + cell / 2, cy = sy(match.core[1]) + cell / 2;
-    ctx.strokeStyle = "rgba(255,207,107,.55)";
-    ctx.lineWidth = Math.max(1, cell / 6);
-    ctx.strokeRect(cx - cell * 2, cy - cell * 2, cell * 4, cell * 4);
-  }
+  const tick = lerp(world.fromTick, world.tick, alpha);
+  const view = { ox, oy, cols, rows, cell, sx, sy, now, tick, terrain };
+  drawBuildings(ctx, world, view);
+  drawBeltItems(ctx, world, view);
+  drawUnits(ctx, world, { cell, sx, sy, now, alpha, tick, terrain });
+  drawShots(ctx, world, { cell, sx, sy });
+  drawEffects(ctx, world, { cell, sx, sy, now });
+
+  multiplyMask(ctx, darkMask(terrain), terrain, { rawX, rawY, viewH, cell, width, height });
+}
+
+/**
+ * Stretch a one-texel-per-tile mask over the view and multiply it in.
+ *
+ * Linear filtering is what makes this work: the browser interpolates between texels, so a
+ * grid of grey squares arrives as a smooth field. Half a tile of offset lines the texel
+ * centres up with the tile centres they describe.
+ */
+function multiplyMask(ctx, mask, terrain, v) {
+  ctx.save();
+  ctx.globalCompositeOperation = "multiply";
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  // Texel centres onto tile centres: mask pixel n describes tile n, and the browser
+  // samples from the middle of each.
+  const x = -v.rawX * v.cell;
+  const y = (v.rawY + v.viewH - terrain.height) * v.cell;
+  ctx.drawImage(mask, x, y, terrain.width * v.cell, terrain.height * v.cell);
+  ctx.restore();
 }
 
 /**
@@ -827,6 +1196,136 @@ function pickAgent(world, match) {
   return bestDistance < 9 ? best : null;
 }
 
+/** Draw one building the way the engine layers it: base, moving part, housing. */
+function drawBlockSprite(ctx, world, tile, b, info, v) {
+  const { cell, tick } = v;
+  const size = info.size || 1;
+  const span = size * cell;
+  const offset = Math.floor((size - 1) / 2);
+  const x = tile % world.width, y = Math.floor(tile / world.width);
+  const left = v.sx(x - offset), top = v.sy(y + size - 1 - offset);
+  const cx = left + span / 2, cy = top + span / 2;
+
+  const blit = (sprite, frame) => {
+    const f = frame || sprite;
+    ctx.drawImage(atlas, f.x, f.y, f.w, f.h, -span / 2, -span / 2, span, span);
+  };
+
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  if (info.name === "conveyor") {
+    // The shape comes from the engine's own autotiler, sent with the belt. Working it out
+    // again here is how a viewer draws a junction where the game draws a straight run.
+    const shape = world.belts.get(tile);
+    const belt = spriteOf(`conveyor-${shape ? shape.bits : 0}`);
+    if (belt) {
+      const frames = belt.frames || [belt];
+      // The belt runs on the simulation clock, not the browser's, so a match watched at
+      // double speed shows its belts running at double speed too.
+      const frame = frames[Math.floor(Math.abs(tick) * CONVEYOR_RATE) % frames.length];
+      ctx.rotate(-b.rot * Math.PI / 2);
+      ctx.scale(1, shape ? shape.flip : 1);
+      blit(belt, frame);
+      ctx.restore();
+      return;
+    }
+  }
+
+  const base = spriteOf(info.name);
+  if (!base) {
+    ctx.restore();
+    ctx.fillStyle = b.team === TEAM_SHARDED ? FALLBACK.built : "#8a4a4a";
+    ctx.fillRect(left, top, span, span);
+    return;
+  }
+
+  // A turret points where it is aiming, not where it was laid, and slides back when it
+  // fires. Everything else keeps the rotation it was built with.
+  const turret = world.turrets.get(tile);
+  if (turret) {
+    ctx.translate(turret.rx * cell, -turret.ry * cell);
+    ctx.rotate(-turret.angle * Math.PI / 180);
+  } else if (info.rotate && b.rot) {
+    ctx.rotate(-b.rot * Math.PI / 2);
+  }
+  blit(base, frameOf(base, tile));
+
+  if (turret && turret.heat > 2) {
+    // The barrel glows as it heats, which is the only sign a turret is firing when the
+    // shots themselves are too small to see.
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, turret.heat / 100) * 0.8;
+    ctx.globalCompositeOperation = "lighter";
+    const glow = tinted(info.name, "#ff5a3c");
+    if (glow) ctx.drawImage(glow, -span / 2, -span / 2, span, span);
+    ctx.restore();
+  }
+
+  const rotator = spriteOf(info.name + "-rotator");
+  if (rotator) {
+    // A drill turns only while there is ore beneath it, which the terrain already says.
+    ctx.save();
+    if (v.terrain && hasOreUnder(v.terrain, x, y, size, offset)) {
+      ctx.rotate(tick * DRILL_ROTATE * Math.PI / 180);
+    }
+    blit(rotator);
+    ctx.restore();
+  }
+
+  const top_ = spriteOf(info.name + "-top");
+  if (top_) blit(top_);
+
+  // The team-coloured plate some blocks wear. On a core it is most of what tells you
+  // whose it is.
+  const team = tinted(info.name + "-team", teamColour(b.team));
+  if (team) ctx.drawImage(team, -span / 2, -span / 2, span, span);
+
+  ctx.restore();
+}
+
+/**
+ * The cracks a damaged building wears.
+ *
+ * The engine picks one of eight stages from the health left, tints it dark, and turns it
+ * by the tile position so neighbouring blocks do not crack identically. A health bar would
+ * be easier to read and is not something the game ever draws.
+ */
+function drawCracks(ctx, tile, b, info, v) {
+  if (b.hp >= 100) return;
+  const size = info ? (info.size || 1) : 1;
+  const sheet = spriteOf(`cracks-${size}`);
+  if (!sheet || !sheet.frames) return;
+
+  const wear = 1 - b.hp / 100;
+  const stage = sheet.frames[Math.max(0, Math.min(sheet.frames.length - 1,
+    Math.floor(wear * sheet.frames.length)))];
+  const span = size * v.cell;
+  const offset = Math.floor((size - 1) / 2);
+  const x = tile % v.world.width, y = Math.floor(tile / v.world.width);
+  const cx = v.sx(x - offset) + span / 2, cy = v.sy(y + size - 1 - offset) + span / 2;
+
+  ctx.save();
+  ctx.globalAlpha = 0.1 + wear * 0.6;
+  ctx.translate(cx, cy);
+  ctx.rotate((tile % 4) * Math.PI / 2);
+  const dark = tintedFrame(`cracks-${size}`, stage, "#333");
+  if (dark) ctx.drawImage(dark, -span / 2, -span / 2, span, span);
+  ctx.restore();
+}
+
+/** Whether anything under this building's footprint is ore, so a drill has work to do. */
+function hasOreUnder(terrain, x, y, size, offset) {
+  for (let dy = 0; dy < size; dy++) {
+    for (let dx = 0; dx < size; dx++) {
+      const tx = x - offset + dx, ty = y - offset + dy;
+      if (tx < 0 || ty < 0 || tx >= terrain.width || ty >= terrain.height) continue;
+      if (terrain.overlay[ty * terrain.width + tx]) return true;
+    }
+  }
+  return false;
+}
+
 function drawBuildings(ctx, world, v) {
   const { cell, sx, sy, now } = v;
   for (const [tile, b] of world.buildings) {
@@ -835,80 +1334,249 @@ function drawBuildings(ctx, world, v) {
 
     const info = world.blocks[String(b.block)];
     const size = info ? (info.size || 1) : 1;
+    const span = size * cell;
     const offset = Math.floor((size - 1) / 2);
-    const left = sx(x - offset), topY = sy(y + size - 1 - offset);
-    const s = info ? spriteOf(info.name) : null;
+    const left = sx(x - offset), top = sy(y + size - 1 - offset);
     const done = b.prog >= 100;
 
-    ctx.save();
-    if (!done) ctx.globalAlpha = 0.35 + 0.4 * (b.prog / 100);
-
-    if (s) {
-      const f = frameOf(s, tile);
-      // A drill is a base plus a translucent top, and a conveyor points where it was
-      // laid. Drawing the base alone leaves a hole where the machine should be.
-      const top = spriteOf(info.name + "-top");
-      if (info.rotate && b.rot) {
-        const cx = left + size * cell / 2, cy = topY + size * cell / 2;
-        ctx.translate(cx, cy);
-        ctx.rotate(-b.rot * Math.PI / 2);
-        ctx.drawImage(atlas, f.x, f.y, f.w, f.h, -size * cell / 2, -size * cell / 2, size * cell, size * cell);
-      } else {
-        ctx.drawImage(atlas, f.x, f.y, f.w, f.h, left, topY, size * cell, size * cell);
-        if (top) ctx.drawImage(atlas, top.x, top.y, top.w, top.h, left, topY, size * cell, size * cell);
-      }
-    } else {
-      ctx.fillStyle = b.team === TEAM_SHARDED ? FALLBACK.built : "#8a4a4a";
-      ctx.fillRect(left, topY, size * cell, size * cell);
-    }
-    ctx.restore();
-
-    if (!done) {
-      // Hatching, so "not finished yet" reads without relying on colour alone.
+    if (done) {
+      if (info) drawBlockSprite(ctx, world, tile, b, info, v);
+      else { ctx.fillStyle = "#8a4a4a"; ctx.fillRect(left, top, span, span); }
+    } else if (info) {
+      // Under construction the engine paints the block it is becoming in the team accent
+      // and reveals it as the work progresses. Showing the scaffold instead would be
+      // accurate and tell nobody what is being built there.
       ctx.save();
-      ctx.strokeStyle = "rgba(255,207,107,.85)";
-      ctx.lineWidth = Math.max(1, cell / 8);
-      ctx.setLineDash([cell / 3, cell / 3]);
-      ctx.strokeRect(left, topY, size * cell, size * cell);
+      ctx.beginPath();
+      ctx.rect(left, top + span * (1 - b.prog / 100), span, span * b.prog / 100);
+      ctx.clip();
+      drawBlockSprite(ctx, world, tile, b, info, v);
+      ctx.globalCompositeOperation = "source-atop";
+      ctx.fillStyle = "rgba(255,211,127,.55)";
+      ctx.fillRect(left, top, span, span);
       ctx.restore();
-    } else if (now - b.doneAt < 320) {
-      const k = 1 - (now - b.doneAt) / 320;
-      ctx.strokeStyle = `rgba(255,255,255,${0.85 * k})`;
-      ctx.lineWidth = Math.max(1, cell / 5);
-      ctx.strokeRect(left, topY, size * cell, size * cell);
+
+      const line = top + span * (1 - b.prog / 100);
+      ctx.fillStyle = "rgba(255,231,180,.9)";
+      ctx.fillRect(left, line - Math.max(1, cell / 12), span, Math.max(1, cell / 6));
     }
 
+    if (done && now - b.doneAt < 320) {
+      const k = 1 - (now - b.doneAt) / 320;
+      ctx.strokeStyle = `rgba(255,255,255,${0.8 * k})`;
+      ctx.lineWidth = Math.max(1, cell / 5);
+      ctx.strokeRect(left, top, span, span);
+    }
     if (now - b.hurtAt < 260) {
       const k = 1 - (now - b.hurtAt) / 260;
       ctx.fillStyle = `rgba(255,80,70,${0.5 * k})`;
-      ctx.fillRect(left, topY, size * cell, size * cell);
+      ctx.fillRect(left, top, span, span);
     }
-    if (b.hp < 100 && done) {
-      ctx.fillStyle = "rgba(0,0,0,.55)";
-      ctx.fillRect(left, topY - cell * 0.22, size * cell, cell * 0.16);
-      ctx.fillStyle = b.hp > 50 ? "#79dd9a" : "#ff7b72";
-      ctx.fillRect(left, topY - cell * 0.22, size * cell * b.hp / 100, cell * 0.16);
+    if (done) drawCracks(ctx, tile, b, info, { ...v, world });
+  }
+}
+
+/**
+ * The items riding the belts.
+ *
+ * These are the engine's own positions, not a guess: every item on every conveyor carries
+ * where it is along the belt and how far it has drifted across it. Drawn after the belts
+ * and before the units, exactly where the engine puts them.
+ */
+function drawBeltItems(ctx, world, v) {
+  const { cell, sx, sy } = v;
+  const size = cell * 5 / 8;              // Five world units, and eight to the tile.
+
+  for (const [tile, belt] of world.belts) {
+    if (!belt.items.length) continue;
+    const x = tile % world.width, y = Math.floor(tile / world.width);
+    if (x < v.ox - 2 || x > v.ox + v.cols + 2 || y < v.oy - 2 || y > v.oy + v.rows + 2) continue;
+
+    const b = world.buildings.get(tile);
+    if (!b) continue;
+    const angle = b.rot * Math.PI / 2;
+    const ax = Math.cos(angle), ay = Math.sin(angle);
+    const cx = sx(x) + cell / 2, cy = sy(y) + cell / 2;
+
+    for (const [id, across, along] of belt.items) {
+      const item = world.itemNames[String(id)];
+      const s = item && spriteOf("item-" + item.name);
+      if (!s) continue;
+      // Along the belt, then half a tile back and sideways, as the engine composes it.
+      const ox = ax * along - ax * 0.5 - ay * across * 0.5;
+      const oy = ay * along - ay * 0.5 + ax * across * 0.5;
+      ctx.drawImage(atlas, s.x, s.y, s.w, s.h,
+        cx + ox * cell - size / 2, cy - oy * cell - size / 2, size, size);
     }
   }
 }
 
-/** A destroyed building leaves a brief flare, so losses are visible and not just absent. */
-function drawWrecks(ctx, world, v) {
+/**
+ * Every effect currently playing, drawn as the engine defines it.
+ *
+ * `fin` runs zero to one over the effect's life, `fout` is its complement, and `fslope`
+ * rises and falls again. Those three drive every shape here, exactly as they do in `Fx`.
+ */
+function drawEffects(ctx, world, v) {
   const { cell, sx, sy, now } = v;
-  for (const [tile, wreck] of world.dying) {
-    const k = 1 - (now - wreck.at) / 500;
-    if (k <= 0) continue;
-    const x = tile % world.width, y = Math.floor(tile / world.width);
-    ctx.save();
-    ctx.globalAlpha = k;
-    ctx.strokeStyle = "#ff9b52";
-    ctx.lineWidth = Math.max(1, cell / 4);
-    ctx.beginPath();
-    ctx.arc(sx(x) + cell / 2, sy(y) + cell / 2, cell * (0.6 + 1.6 * (1 - k)), 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
+  const unit = cell / 8;                     // Eight world units to the tile.
+
+  for (const e of world.effects.list) {
+    const fin = Math.min(1, (now - e.at) / e.life);
+    const fout = 1 - fin;
+    const fslope = fin * fout * 4;
+
+    if (e.kind === "mine") {
+      // Six chips of ore thrown off the tile, fading from its colour to light grey.
+      ctx.fillStyle = mixHex(e.color, "#d3d3d3", fin);
+      const cx = sx(e.x) + cell / 2, cy = sy(e.y) + cell / 2;
+      randLenVectors(e.id, 6, (3 + fin * 6) * unit, (dx, dy) => {
+        const s = Math.max(0.7, fout * 2 * unit);
+        ctx.fillRect(cx + dx - s / 2, cy - dy - s / 2, s, s);
+      });
+
+    } else if (e.kind === "transfer") {
+      // The ore flying to the core, easing in and swinging out sideways on the way.
+      const k = fin * fin * fin;
+      const px = lerp(e.x, e.toX, k), py = lerp(e.y, e.toY, k);
+      const dx = e.toX - e.x, dy = e.toY - e.y;
+      const length = Math.hypot(dx, dy) || 1;
+      const swing = (((e.id * 2654435761) % 1000) / 500 - 1) * fslope * 10 / 8;
+      const ox = -dy / length * swing, oy = dx / length * swing;
+      const cx = sx(px + ox) + cell / 2, cy = sy(py + oy) + cell / 2;
+
+      ctx.fillStyle = `rgba(${PAL_ACCENT},1)`;
+      ctx.beginPath(); ctx.arc(cx, cy, fslope * 3 * unit, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = e.color;
+      ctx.beginPath(); ctx.arc(cx, cy, fslope * 1.5 * unit, 0, Math.PI * 2); ctx.fill();
+
+    } else if (e.kind === "place" || e.kind === "break") {
+      const breaking = e.kind === "break";
+      const cx = sx(e.x) + cell / 2, cy = sy(e.y) + cell / 2;
+      const half = (4 * e.size + fin * 3) * unit;
+      ctx.strokeStyle = `rgba(${breaking ? PAL_REMOVE : PAL_ACCENT},1)`;
+      ctx.lineWidth = Math.max(1, (3 - fin * 2) * unit);
+      ctx.strokeRect(cx - half, cy - half, half * 2, half * 2);
+
+      if (breaking) {
+        ctx.fillStyle = `rgba(${PAL_REMOVE},1)`;
+        const count = 3 + Math.round(e.size * 3);
+        randLenVectors(e.id, count, (e.size * 2 + 8 * e.size * fin * fin) * unit, (dx, dy) => {
+          const s = (1 + fout * (3 + e.size)) * unit;
+          ctx.fillRect(cx + dx - s / 2, cy - dy - s / 2, s, s);
+        });
+      }
+    }
   }
 }
+
+/** Blend two hex colours, the way the effects lerp from an ore colour to grey. */
+function mixHex(a, b, k) {
+  const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
+  const mix = (sa, sb) => Math.round(lerp((pa >> sa) & 255, (pb >> sb) & 255, k));
+  return `rgb(${mix(16, 16)},${mix(8, 8)},${mix(0, 0)})`;
+}
+
+/**
+ * The mining beam, as the engine draws it.
+ *
+ * A solid line from the nose of the unit to a point that wobbles over the tile being
+ * mined, flashing between light grey and white, with a dot in the colour of the ore at the
+ * far end. A dashed line was a placeholder that read as a user interface element rather
+ * than as something happening in the world.
+ */
+function drawMining(ctx, v) {
+  const { cx, cy, rot, span, cell, now } = v;
+  const t = now / 1000 * 60;                      // Ticks, for the same wobble rate.
+  const nose = span / 2;
+  const px = cx + Math.cos(-rot * Math.PI / 180) * nose;
+  const py = cy + Math.sin(-rot * Math.PI / 180) * nose;
+
+  const swing = cell / 8;
+  const ex = v.sx(v.tile % v.world.width) + cell / 2 + Math.sin(t / 12) * swing;
+  const ey = v.sy(Math.floor(v.tile / v.world.width)) + cell / 2 + Math.sin(t / 14) * swing;
+
+  const flash = 0.7 + 0.3 * Math.abs(Math.sin(t / 2));
+  ctx.save();
+  ctx.strokeStyle = `rgba(255,255,255,${flash})`;
+  ctx.lineWidth = Math.max(1, cell * 0.15);
+  ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(ex, ey); ctx.stroke();
+
+  ctx.fillStyle = "#d99d73";
+  ctx.beginPath();
+  ctx.arc(ex, ey, Math.max(1.5, cell * (0.12 + 0.06 * Math.abs(Math.sin(t / 5)))), 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+/**
+ * The engine flames on a flying unit.
+ *
+ * Positions come from the unit type rather than being guessed behind the sprite: a circle
+ * in the team colour that breathes with a sine, with a white core inside it, exactly where
+ * the engine placed each one.
+ */
+function drawEngines(ctx, type, unit, v) {
+  const engines = type.engines;
+  if (!engines || !engines.length || !v.elevation) return;
+
+  ctx.save();
+  ctx.translate(v.cx, v.cy);
+  ctx.rotate(v.angle);
+  for (let i = 0; i + 3 < engines.length; i += 4) {
+    const [ex, ey, radius] = [engines[i], engines[i + 1], engines[i + 2]];
+    const rad = (radius + absin(v.tick, 2, radius / 4)) * v.elevation * v.cell;
+    if (rad <= 0.2) continue;
+    // The sprite points up, so the engine offsets are laid out in that frame too.
+    const px = ex * v.cell, py = -ey * v.cell;
+    ctx.fillStyle = teamColour(unit.team);
+    ctx.beginPath(); ctx.arc(px, py, rad, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.beginPath(); ctx.arc(px, py, rad * 0.5, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+/**
+ * The ore a unit is carrying, drawn on its back.
+ *
+ * A ring in the team accent with the ore on top of it and the count beside, sized by a
+ * sine so it reads as held rather than painted on. This is the thing that makes a mining
+ * run legible: you can see it leave empty and come back loaded.
+ */
+function drawCarried(ctx, world, unit, type, v) {
+  const item = world.itemNames[String(unit.item)];
+  if (!item) return;
+
+  const offset = (type.item_offset || 3 / 8) * v.cell;
+  const back = -(v.rot * Math.PI / 180);
+  const px = v.cx - Math.cos(back) * offset;
+  const py = v.cy + Math.sin(back) * offset;
+
+  const sin = absin(v.tick, 5, 1);
+  const ring = tinted("ring-item", `rgb(${PAL_ACCENT})`);
+  if (ring) {
+    const size = ((3 + sin) / 8 + 0.5 / 8) * 2 * v.cell;
+    ctx.drawImage(ring, px - size / 2, py - size / 2, size, size);
+  }
+
+  const s = spriteOf("item-" + item.name);
+  if (s) {
+    const size = ((type.item_size || 5 / 8) + sin / 8) * v.cell;
+    ctx.drawImage(atlas, s.x, s.y, s.w, s.h, px - size / 2, py - size / 2, size, size);
+  }
+
+  if (v.cell > 5) {
+    ctx.fillStyle = `rgb(${PAL_ACCENT})`;
+    ctx.font = `${Math.max(8, v.cell * 0.7)}px ui-monospace, monospace`;
+    ctx.textAlign = "center";
+    ctx.fillText(String(unit.stack), px, py + v.cell * 1.2);
+    ctx.textAlign = "start";
+  }
+}
+
+/** How far a flying unit throws its shadow, in tiles, from Pal and UnitType. */
+const SHADOW_TX = -12 / 8, SHADOW_TY = -13 / 8;
 
 function drawUnits(ctx, world, v) {
   const { cell, sx, sy, alpha, now } = v;
@@ -917,48 +1585,80 @@ function drawUnits(ctx, world, v) {
     const rot = lerpAngle(unit.frot, unit.rot, alpha);
     const ally = unit.team === TEAM_SHARDED;
     const cx = sx(x) + cell / 2, cy = sy(y) + cell / 2;
-    const name = world.types[String(unit.type)];
-    const s = spriteOf(name);
-    const scale = Math.max(cell * 1.6, 7);
 
-    ctx.save();
-    ctx.translate(cx, cy);
+    const type = world.types[String(unit.type)] || {};
+    const s = spriteOf(type.name);
+    // The sprite at its true size: thirty-two pixels of art cover one tile. Floored so a
+    // unit stays findable when the whole map is on screen.
+    const span = s ? Math.max(6, (s.w / 32) * cell) : Math.max(6, cell * 1.4);
+    // Sprites point up, world rotation counts anticlockwise from east, and the canvas
+    // counts y downwards, which is the whole of the quarter turn below.
+    const angle = (90 - rot) * Math.PI / 180;
+
     if (s) {
-      // Mindustry unit sprites point up; world rotation is degrees counterclockwise from
-      // east, and the canvas has y downwards, hence the flip and the quarter turn.
-      ctx.rotate((90 - rot) * Math.PI / 180);
-      ctx.drawImage(atlas, s.x, s.y, s.w, s.h, -scale / 2, -scale / 2, scale, scale);
+      const elevation = type.flying ? 1 : 0.11;
+      drawEngines(ctx, type, unit, { cx, cy, angle, cell, elevation, tick: v.tick });
+      const shadow = tinted(type.name, "#000");
+      if (shadow) {
+        ctx.save();
+        ctx.globalAlpha = SHADOW_ALPHA;
+        ctx.translate(cx + SHADOW_TX * cell * elevation, cy - SHADOW_TY * cell * elevation);
+        ctx.rotate(angle);
+        ctx.drawImage(shadow, -span / 2, -span / 2, span, span);
+        ctx.restore();
+      }
+
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(angle);
+      ctx.drawImage(atlas, s.x, s.y, s.w, s.h, -span / 2, -span / 2, span, span);
+      // The team cell, which is how a side is read in the game itself.
+      const cellSprite = tinted(type.name + "-cell", teamColour(unit.team));
+      if (cellSprite) ctx.drawImage(cellSprite, -span / 2, -span / 2, span, span);
+      ctx.restore();
+
+      if (unit.item >= 0 && unit.stack > 0) {
+        drawCarried(ctx, world, unit, type, { cx, cy, rot, cell, tick: v.tick });
+      }
     } else {
       ctx.fillStyle = ally ? "#79c0ff" : "#ff7b72";
       ctx.beginPath();
-      ctx.arc(0, 0, scale / 2.6, 0, Math.PI * 2);
+      ctx.arc(cx, cy, span / 2.6, 0, Math.PI * 2);
       ctx.fill();
     }
-    ctx.restore();
 
-    // A ring in the team colour, because at this scale the sprites of two teams are the
-    // same silhouette and colour alone inside the sprite is not readable.
-    ctx.strokeStyle = ally ? "rgba(121,192,255,.9)" : "rgba(255,123,114,.9)";
-    ctx.lineWidth = Math.max(1, cell / 5);
-    ctx.beginPath();
-    ctx.arc(cx, cy, scale * 0.62, 0, Math.PI * 2);
-    ctx.stroke();
+    // Zoomed out a unit is a few pixels across and its cell is invisible, so a ring
+    // stands in for it. Zoomed in the cell does the job and the ring would be clutter the
+    // game never draws.
+    if (cell < 6) {
+      ctx.strokeStyle = ally ? "rgba(121,192,255,.9)" : "rgba(255,123,114,.9)";
+      ctx.lineWidth = Math.max(1, cell / 4);
+      ctx.beginPath();
+      ctx.arc(cx, cy, Math.max(3, span * 0.6), 0, Math.PI * 2);
+      ctx.stroke();
+    }
 
     if (unit.flags & 1 && unit.mine >= 0) {
-      const mx = sx(unit.mine % world.width) + cell / 2;
-      const my = sy(Math.floor(unit.mine / world.width)) + cell / 2;
-      ctx.strokeStyle = "rgba(224,169,122,.8)";
-      ctx.lineWidth = Math.max(1, cell / 6);
-      ctx.setLineDash([cell / 2, cell / 2]);
-      ctx.lineDashOffset = -(now / 40) % (cell);
-      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(mx, my); ctx.stroke();
-      ctx.setLineDash([]);
+      drawMining(ctx, { cx, cy, rot, span, cell, sx, sy, now, world, tile: unit.mine });
+      // The engine throws a handful of chips off the tile on every mining hit. Emitted
+      // here because the fact that mining is happening is in the observation; the chips
+      // are only ever a drawing.
+      if (!unit.mineAt || now - unit.mineAt > 180) {
+        unit.mineAt = now;
+        const overlay = v.terrain
+          ? v.terrain.palette[String(v.terrain.overlay[unit.mine])] : null;
+        world.effects.add("mine", 20, {
+          x: unit.mine % world.width, y: Math.floor(unit.mine / world.width),
+          color: oreColour(overlay && overlay.name),
+        });
+      }
     }
     if (unit.hp < 100) {
+      const bar = Math.max(2, cell * 0.16);
       ctx.fillStyle = "rgba(0,0,0,.6)";
-      ctx.fillRect(cx - scale / 2, cy - scale * 0.85, scale, Math.max(2, cell * 0.16));
+      ctx.fillRect(cx - span / 2, cy - span * 0.8, span, bar);
       ctx.fillStyle = unit.hp > 40 ? "#79dd9a" : "#ff7b72";
-      ctx.fillRect(cx - scale / 2, cy - scale * 0.85, scale * unit.hp / 100, Math.max(2, cell * 0.16));
+      ctx.fillRect(cx - span / 2, cy - span * 0.8, span * unit.hp / 100, bar);
     }
   }
 }

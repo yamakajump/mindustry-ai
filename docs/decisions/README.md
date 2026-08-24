@@ -17,5 +17,6 @@ mistake is worth more than a clean history that hides it.
 | [8](0008-embodied-agent.md) | The agent plays with a body | accepted |
 | [9](0009-normalised-inputs.md) | Normalised inputs, and the entropy collapse they caused | accepted |
 | [10](0010-live-scene-stream.md) | A scene stream, so training can be watched rather than inferred | accepted |
+| [11](0011-render-like-the-engine.md) | Reproduce the engine rendering, do not approximate it | accepted |
 
 The overall picture these add up to is in [`../architecture.md`](../architecture.md).

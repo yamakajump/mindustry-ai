@@ -99,6 +99,11 @@ public class MapExporter {
             } else {
                 entry.put("variants", 0);
             }
+            // What the renderer needs to reproduce two passes it cannot infer from the
+            // sprite: which tiles cast the soft shadow the whole map sits under, and
+            // which are deep enough inside a rock mass to go black.
+            entry.put("shadow", block.hasShadow && block != mindustry.content.Blocks.air);
+            entry.put("dark", block.solid && !block.synthetic() && block.fillsTile);
             palette.put(String.valueOf(block.id), entry);
         }
         return palette;

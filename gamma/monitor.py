@@ -56,7 +56,16 @@ class SceneBuffer:
         #: far behind has to be resynced rather than patched.
         self.dropped_before = 0
         self.blocks: dict[str, Any] = {}
-        self.types: dict[str, str] = {}
+        self.types: dict[str, Any] = {}
+        self.item_names: dict[str, str] = {}
+        #: Conveyors and what rides on them. Replaced wholesale each frame: a belt is
+        #: nothing but movement, so there is no delta to take.
+        self.belts: list[float] = []
+        #: Where each turret points and how hard it just kicked, whole each frame.
+        self.turrets: list[float] = []
+        #: Item handovers not yet handed to a viewer. Queued rather than overwritten: at
+        #: ten frames a second a viewer polling at five would miss half of them.
+        self.deposits: list[list[float]] = []
         #: Which unit the agent inhabits, so a viewer never has to guess.
         self.agent = -1
         self.tick = 0.0
@@ -73,12 +82,16 @@ class SceneBuffer:
             self.version += 1
             self.units = []
             self.shots = []
+            self.belts = []
+            self.turrets = []
+            self.deposits.clear()
             self.buildings.clear()
             self.changed_at.clear()
             self.removed.clear()
             self.dropped_before = self.version
             self.blocks.clear()
             self.types.clear()
+            self.item_names.clear()
 
     def apply(self, frame: dict[str, Any]) -> None:
         """Fold one bridge frame into the world."""
@@ -99,8 +112,16 @@ class SceneBuffer:
             self.agent = int(frame.get("agent", -1))
             self.units = list(frame.get("units", []))
             self.shots = list(frame.get("shots", []))
+            self.belts = list(frame.get("belts", []))
+            self.turrets = list(frame.get("turrets", []))
+            if frame.get("deposit"):
+                # Stamped with the version, so a viewer plays each handover exactly once
+                # however often it polls.
+                self.deposits.append([version, *(float(v) for v in frame["deposit"])])
+                del self.deposits[:-16]
             self.blocks.update(frame.get("blocks") or {})
             self.types.update(frame.get("types") or {})
+            self.item_names.update(frame.get("items") or {})
 
             placed = frame.get("placed", [])
             for i in range(0, len(placed) - 5, 6):
@@ -170,6 +191,12 @@ class SceneBuffer:
                 "height": self.height,
                 "units": self.units,
                 "shots": self.shots,
+                "belts": self.belts,
+                "turrets": self.turrets,
+                "items": self.item_names,
+                # A viewer arriving late replays nothing: these are moments, and playing
+                # a minute of banked handovers at once would be a firework display.
+                "deposits": [] if full else [d[1:] for d in self.deposits if d[0] > version],
                 "placed": placed,
                 "removed": removed,
                 "blocks": blocks,

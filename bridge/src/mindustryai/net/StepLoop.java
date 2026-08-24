@@ -272,7 +272,7 @@ public class StepLoop implements ApplicationListener {
      */
     private void handleScene() {
         int agent = body != null && body.unit() != null ? body.unit().id() : -1;
-        server.reply(scenes.encode(agent).toString());
+        server.reply(scenes.encode(agent, body == null ? null : body.takeDeposit()).toString());
     }
 
     /**

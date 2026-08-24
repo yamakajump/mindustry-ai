@@ -63,10 +63,11 @@ destruction leaves a flare, and shots are drawn in flight. The ground is painted
 an offscreen canvas and blitted, because repainting eighty thousand tiles per frame across
 six matches is what would make it unwatchable.
 
-Item flow on conveyors is deliberately absent, and is the one visible thing that cannot be
-sent honestly. Items move every tick and there are thousands of them; a frame every
-hundred milliseconds would show them teleporting. A viewer that wants them should animate
-them from the throughput of the conveyor rather than be told where each one is.
+Item flow on conveyors travels too, and the first version of this decision claimed it
+could not. That was wrong, and worth recording: a belt keeps its own list of what is on it
+and where, so sending it is a few hundred numbers a frame rather than a simulation the
+viewer would have to invent. The correction matters because "it cannot be done honestly"
+is the kind of claim that quietly settles a question nobody reopens.
 
 The cost is a second request per collected frame on watched matches. Measured on a
 three-environment run: frames of 371 to 772 bytes, and deltas smaller again once a viewer
