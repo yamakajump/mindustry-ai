@@ -65,3 +65,5 @@ Thumbs.db
 
 # Le jar du mod est construit, pas versionne
 replay-mod/build/
+checkpoints/
+mindustry-beta/

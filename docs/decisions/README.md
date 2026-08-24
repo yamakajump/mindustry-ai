@@ -15,5 +15,6 @@ mistake is worth more than a clean history that hides it.
 | [6](0006-fixed-timestep-acceleration.md) | Fixed timestep, with speed controlled by frame budget | accepted |
 | [7](0007-pause-based-synchronous-stepping.md) | Synchronous stepping by pausing, not by blocking | accepted |
 | [8](0008-embodied-agent.md) | The agent plays with a body | accepted |
+| [9](0009-normalised-inputs.md) | Normalised inputs, and the entropy collapse they caused | accepted |
 
 The overall picture these add up to is in [`../architecture.md`](../architecture.md).
