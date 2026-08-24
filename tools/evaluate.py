@@ -26,6 +26,7 @@ import torch
 
 from gamma import tasks
 from gamma.env import MindustryEnv
+from gamma.library import load as load_designs
 from gamma.net import PolicyNet
 from gamma.ppo import PPOConfig
 from gamma.window import DEFAULT_SIZE, LocalWindow
@@ -159,6 +160,12 @@ def main() -> None:
     parser.add_argument("--channels", type=int, default=14)
     parser.add_argument("--port", type=int, default=7910)
     parser.add_argument("--root", default="mindustry-eval")
+    parser.add_argument("--designs", default="docs/designs.json",
+                        help="the structures the policy was trained with. A checkpoint "
+                             "trained with them has a wider action head, so evaluating it "
+                             "without them fails on a shape mismatch rather than on a "
+                             "score, and a checkpoint trained without them must be "
+                             "evaluated with an empty string here")
     parser.add_argument("--no-random", dest="random", action="store_false", default=True)
     parser.add_argument("--out", type=Path, default=Path("docs/measurements/generalisation.json"))
     args = parser.parse_args()
@@ -169,10 +176,14 @@ def main() -> None:
     jar = str(next((Path("bridge") / "build" / "libs").glob("*.jar")))
     task = tasks.get(args.task)
 
+    designs = ()
+    if args.designs and Path(args.designs).is_file():
+        designs = tuple(load_designs(Path(args.designs)))
+
     env = LocalWindow(
         MindustryEnv(
             task, server_dir=args.root, bridge_port=args.port, game_port=args.port - 1000,
-            jar=jar, embodied=True, speed="max", evaluating=True,
+            jar=jar, embodied=True, speed="max", evaluating=True, designs=designs,
         ),
         size=args.window, channels=args.channels,
     )
@@ -198,7 +209,8 @@ def main() -> None:
         raise SystemExit("nothing to evaluate: pass a checkpoint, or keep the random floor")
 
     started = time.time()
-    report = {"task": task.name, "held_out": True, "episodes_each": args.episodes, "results": []}
+    report = {"task": task.name, "held_out": True, "episodes_each": args.episodes,
+              "designs": len(designs), "results": []}
 
     for name, policy in contenders:
         outcomes = [play(env, policy, task, args.max_steps) for _ in range(args.episodes)]
