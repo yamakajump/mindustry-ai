@@ -240,3 +240,12 @@ class Bridge:
     def observe(self) -> dict[str, Any]:
         """Read current state without advancing the world."""
         return self.request({"cmd": "observe"})
+
+    def scene(self) -> dict[str, Any]:
+        """Everything that moved since the last call: units, buildings, shots.
+
+        Deltas, so calling it every step is cheap, and calling it once after a thousand
+        steps returns only what differs from the last frame the caller actually saw. That
+        makes it safe to poll from a dashboard at whatever rate the browser manages.
+        """
+        return self.request({"cmd": "scene"})

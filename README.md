@@ -71,20 +71,46 @@ Full details in [`docs/architecture.md`](docs/architecture.md). The reasoning be
 choice, including the alternatives that were rejected, is in
 [`docs/decisions/`](docs/decisions/).
 
-## Watch training happen
+## Train, and watch it happen
 
 ```bash
-python tools/train_watch.py --matches 6 --embodied
+python tools/train_beta.py
 ```
 
-Opens a dashboard on `127.0.0.1:8800` with every match running side by side: a mini map
-per match showing the core, the agent's unit and everything it has built, plus step,
-wave, reward, refusals, core stock, a progress bar against the objective, a leaderboard
-and a trend line over recent episodes.
+That is the whole command. It clears servers a previous run left behind, builds the
+bridge plugin if it is missing, starts the environments, opens the dashboard and trains
+until stopped.
+
+The dashboard on `127.0.0.1:8800` shows every match at once, **animated with the game's
+own sprites**: the agent flying, mining and building, enemies arriving in waves,
+construction hatched until it completes, damage flashing, buildings exploding, shots in
+flight. Beside them, what the game itself never shows:
+
+- **the learning curve**, mean reward per generation, raw and smoothed
+- **saved versions**, one checkpoint every ten generations plus `beta-best.pt`, chosen on
+  the average across a generation rather than on one lucky episode
+- **replays** of the best episodes, one click to watch them back
+- the objective, the leaderboard, and a legend for everything on screen
 
 Each match is its own Mindustry process, because the engine is not thread safe. No
 dependencies beyond the standard library: a dashboard that needs a web framework
 installed is a dashboard that is not running when you want it.
+
+Useful flags: `--envs N`, `--task {T1_copper,T2_two_ores,T4_survive,GZ_capture,endless}`,
+`--direct` to drop the body and train faster, `--watch N` to pick which match runs at a
+speed a person can follow, `--no-record` to skip replays.
+
+### Or join it in the real game
+
+Every environment is a real headless server with its game port open. The watched match
+prints its address on startup:
+
+```
+Mindustry -> Play -> Join Game -> 127.0.0.1:6920
+```
+
+That is the engine rendering itself, so it is the best possible picture of one match. The
+dashboard is the better picture of a training run. They are not substitutes.
 
 ## Watch it play
 

@@ -25,6 +25,158 @@ from typing import Any
 VIEWER_DIR = Path(__file__).resolve().parent.parent / "viewer"
 
 
+class SceneBuffer:
+    """The animated world of one match, kept current and served incrementally.
+
+    The bridge hands out deltas against its own last frame, which suits a single reader
+    and nobody else: a browser that polls twice a second would only ever receive the two
+    frames it happened to land on, and would miss everything in between. So the deltas are
+    folded here into an authoritative world, and every change is stamped with a version.
+    A viewer then asks for what changed since the version it holds and gets exactly that,
+    whatever rate it polls at, and a viewer arriving late gets the whole world instead.
+
+    Units are always sent in full. There are hundreds of them at worst, they all move every
+    frame anyway, and tracking arrivals and departures separately would cost more code than
+    the bytes it saves.
+    """
+
+    #: Removals kept for replay to late pollers. Beyond this a viewer is resynced from
+    #: scratch, which is correct and rare, rather than shown a building that no longer
+    #: exists.
+    MAX_REMOVED = 2000
+
+    def __init__(self) -> None:
+        self.version = 0
+        self.units: list[float] = []
+        self.shots: list[float] = []
+        self.buildings: dict[int, list[int]] = {}
+        self.changed_at: dict[int, int] = {}
+        self.removed: list[tuple[int, int]] = []
+        #: Versions below this no longer have their removals retained, so a viewer that
+        #: far behind has to be resynced rather than patched.
+        self.dropped_before = 0
+        self.blocks: dict[str, Any] = {}
+        self.types: dict[str, str] = {}
+        #: Which unit the agent inhabits, so a viewer never has to guess.
+        self.agent = -1
+        self.tick = 0.0
+        self.wave = 0
+        self.wave_time = 0.0
+        self.enemies = 0
+        self.width = 0
+        self.height = 0
+        self._lock = threading.Lock()
+
+    def clear(self) -> None:
+        """Drop the world, keeping the version so viewers resync rather than rewind."""
+        with self._lock:
+            self.version += 1
+            self.units = []
+            self.shots = []
+            self.buildings.clear()
+            self.changed_at.clear()
+            self.removed.clear()
+            self.dropped_before = self.version
+            self.blocks.clear()
+            self.types.clear()
+
+    def apply(self, frame: dict[str, Any]) -> None:
+        """Fold one bridge frame into the world."""
+        if not frame.get("playing"):
+            return
+
+        with self._lock:
+            self.version += 1
+            version = self.version
+
+            self.tick = float(frame.get("tick", 0.0))
+            self.wave = int(frame.get("wave", 0))
+            self.wave_time = float(frame.get("wave_time", 0.0))
+            self.enemies = int(frame.get("enemies", 0))
+            self.width = int(frame.get("width", self.width))
+            self.height = int(frame.get("height", self.height))
+
+            self.agent = int(frame.get("agent", -1))
+            self.units = list(frame.get("units", []))
+            self.shots = list(frame.get("shots", []))
+            self.blocks.update(frame.get("blocks") or {})
+            self.types.update(frame.get("types") or {})
+
+            placed = frame.get("placed", [])
+            for i in range(0, len(placed) - 5, 6):
+                tile = int(placed[i])
+                self.buildings[tile] = [int(v) for v in placed[i + 1:i + 6]]
+                self.changed_at[tile] = version
+
+            hurt = frame.get("hurt", [])
+            for i in range(0, len(hurt) - 1, 2):
+                tile = int(hurt[i])
+                building = self.buildings.get(tile)
+                if building is not None:
+                    building[3] = int(hurt[i + 1])
+                    self.changed_at[tile] = version
+
+            for tile in frame.get("removed", []):
+                tile = int(tile)
+                self.buildings.pop(tile, None)
+                self.changed_at.pop(tile, None)
+                self.removed.append((version, tile))
+
+            if len(self.removed) > self.MAX_REMOVED:
+                dropped = self.removed[:-self.MAX_REMOVED]
+                del self.removed[:-self.MAX_REMOVED]
+                self.dropped_before = max(self.dropped_before, dropped[-1][0])
+
+    def since(self, version: int) -> dict[str, Any]:
+        """What a viewer holding `version` needs to catch up.
+
+        A version of zero, or one older than the retained removals, is answered with the
+        whole world. Anything else is answered with the difference.
+        """
+        with self._lock:
+            # Behind the retention window, or ahead of us because the match restarted:
+            # either way the only honest answer is the whole world.
+            full = version <= 0 or version < self.dropped_before or version > self.version
+
+            if full:
+                placed: list[int] = []
+                for tile, building in self.buildings.items():
+                    placed.append(tile)
+                    placed.extend(building)
+                removed: list[int] = []
+                blocks = dict(self.blocks)
+                types = dict(self.types)
+            else:
+                placed = []
+                for tile, changed in self.changed_at.items():
+                    if changed > version:
+                        placed.append(tile)
+                        placed.extend(self.buildings[tile])
+                removed = [tile for at, tile in self.removed if at > version]
+                # Descriptions are cumulative and small, so they ride along every time
+                # rather than being tracked. A viewer missing one draws a blank square.
+                blocks = dict(self.blocks)
+                types = dict(self.types)
+
+            return {
+                "version": self.version,
+                "full": full,
+                "agent": self.agent,
+                "tick": round(self.tick),
+                "wave": self.wave,
+                "wave_time": round(self.wave_time),
+                "enemies": self.enemies,
+                "width": self.width,
+                "height": self.height,
+                "units": self.units,
+                "shots": self.shots,
+                "placed": placed,
+                "removed": removed,
+                "blocks": blocks,
+                "types": types,
+            }
+
+
 @dataclass
 class MatchState:
     """What one running environment looks like right now."""
@@ -71,6 +223,13 @@ class MatchState:
     #: True when this match runs at a speed a human can follow.
     watchable: bool = False
 
+    #: Units, buildings and shots as they move. Served on its own endpoint: it changes
+    #: several times a second while the rest of this object changes once per step.
+    scene: SceneBuffer = field(default_factory=SceneBuffer)
+
+    #: Recorded episodes kept for this match, best first.
+    replays: list[Any] = field(default_factory=list)
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "index": self.index, "policy": self.policy, "task": self.task,
@@ -85,6 +244,7 @@ class MatchState:
             "built": self.built, "core": self.core, "size": self.size,
             "terrain_version": self.terrain_version,
             "game_port": self.game_port, "watchable": self.watchable,
+            "replays": self.replays,
         }
 
 
@@ -102,6 +262,9 @@ class TrainingMonitor:
         #: guessed from whichever episodes happen to be on screen.
         self._generations: list[dict[str, Any]] = []
         self._pending: list[float] = []
+        #: Replay archives by match, so a recorded episode can be downloaded by name
+        #: without the server ever joining a path from a URL.
+        self._archives: dict[int, Any] = {}
 
     # Collection ------------------------------------------------------------------
 
@@ -133,7 +296,7 @@ class TrainingMonitor:
             # Bounded on purpose: this is a live view, not a datastore.
             del self._history[:-500]
 
-    def record_generation(self, update: int, stats: dict[str, float]) -> None:
+    def record_generation(self, update: int, stats: dict[str, float]) -> dict[str, Any]:
         """Close a training update, summarising the episodes that fed it.
 
         This is what makes progress legible. Individual episodes are noisy enough that a
@@ -144,7 +307,7 @@ class TrainingMonitor:
             self._pending.clear()
             best_wave = max((m.wave for m in self._matches.values()), default=0)
 
-            self._generations.append({
+            generation = {
                 "update": update,
                 "at": round(time.time() - self.started, 1),
                 "episodes": len(rewards),
@@ -153,8 +316,36 @@ class TrainingMonitor:
                 "best_wave": best_wave,
                 "entropy": round(stats.get("entropy", 0.0), 3),
                 "value_loss": round(stats.get("value_loss", 0.0), 4),
-            })
+                #: Set once the weights behind this generation are written to disk, so a
+                #: point on the curve can be pointed at a file rather than admired.
+                "checkpoint": None,
+                "best": False,
+            }
+            self._generations.append(generation)
             del self._generations[:-400]
+            return generation
+
+    def register_replays(self, index: int, archive: Any) -> None:
+        with self._lock:
+            self._archives[index] = archive
+
+    def replay_path(self, index: int, name: str):
+        with self._lock:
+            archive = self._archives.get(index)
+        return archive.resolve(name) if archive else None
+
+    def scene_of(self, index: int, since: int) -> dict[str, Any] | None:
+        with self._lock:
+            state = self._matches.get(index)
+        return state.scene.since(since) if state else None
+
+    def annotate_generation(self, update: int, **fields: Any) -> None:
+        """Attach what was only known after the fact, such as the file that was saved."""
+        with self._lock:
+            for generation in reversed(self._generations):
+                if generation["update"] == update:
+                    generation.update(fields)
+                    return
 
     def terrain_of(self, index: int) -> dict[str, Any] | None:
         with self._lock:
@@ -194,6 +385,8 @@ class TrainingMonitor:
                 "steps_per_second": round(steps / elapsed, 1),
                 "updates": len(generations),
                 "best_wave": max((m["wave"] for m in matches), default=0),
+                "best_generation": next(
+                    (g["update"] for g in reversed(generations) if g["best"]), None),
                 "best_reward": round(max((m["best_reward"] for m in matches), default=0.0), 2),
             },
         }
@@ -218,23 +411,50 @@ class TrainingMonitor:
                     if terrain is None:
                         self.send_error(404)
                         return
-                    body = json.dumps(terrain).encode("utf-8")
+                    self._json(terrain)
+                    return
+
+                if self.path.startswith("/replay/"):
+                    parts = self.path[len("/replay/"):].split("/")
+                    if len(parts) != 2 or not parts[0].isdigit():
+                        self.send_error(400)
+                        return
+                    target = monitor.replay_path(int(parts[0]), parts[1])
+                    if target is None or not target.is_file():
+                        self.send_error(404)
+                        return
+                    body = target.read_bytes()
                     self.send_response(200)
-                    self.send_header("Content-Type", "application/json")
-                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Content-Type", "application/gzip")
                     self.send_header("Content-Length", str(len(body)))
                     self.end_headers()
                     self.wfile.write(body)
                     return
 
+                if self.path.startswith("/scene/"):
+                    # `since` lets a viewer receive only what changed while it was away,
+                    # at whatever rate it polls, instead of the frame the bridge happened
+                    # to produce last.
+                    target, _, query = self.path[len("/scene/"):].partition("?")
+                    try:
+                        index = int(target)
+                    except ValueError:
+                        self.send_error(400)
+                        return
+                    since = 0
+                    for pair in query.split("&"):
+                        key, _, value = pair.partition("=")
+                        if key == "since" and value.isdigit():
+                            since = int(value)
+                    scene = monitor.scene_of(index, since)
+                    if scene is None:
+                        self.send_error(404)
+                        return
+                    self._json(scene)
+                    return
+
                 if self.path.startswith("/state"):
-                    body = json.dumps(monitor.snapshot()).encode("utf-8")
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json")
-                    self.send_header("Cache-Control", "no-store")
-                    self.send_header("Content-Length", str(len(body)))
-                    self.end_headers()
-                    self.wfile.write(body)
+                    self._json(monitor.snapshot())
                     return
 
                 name = "dashboard.html" if self.path in ("/", "") else self.path.lstrip("/")
@@ -247,6 +467,15 @@ class TrainingMonitor:
                 kind = "text/html" if target.suffix == ".html" else "application/octet-stream"
                 self.send_response(200)
                 self.send_header("Content-Type", kind)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def _json(self, payload: dict[str, Any]) -> None:
+                body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Cache-Control", "no-store")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)

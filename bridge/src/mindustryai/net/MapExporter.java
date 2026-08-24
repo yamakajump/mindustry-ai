@@ -89,8 +89,16 @@ public class MapExporter {
             entry.put("size", block.size);
             entry.put("solid", block.solid);
             entry.put("rotate", block.rotate);
-            entry.put("variants", block instanceof mindustry.world.blocks.environment.Floor floor
-                ? floor.variants : 0);
+            if (block instanceof mindustry.world.blocks.environment.Floor floor) {
+                entry.put("variants", floor.variants);
+                // Which floor wins where two meet, so a viewer blends them in the same
+                // direction the engine does. Comparing raw block ids gets it backwards
+                // wherever the ids do not happen to follow the blend order.
+                entry.put("blend", floor.blendGroup.id);
+                entry.put("liquid", floor.isLiquid);
+            } else {
+                entry.put("variants", 0);
+            }
             palette.put(String.valueOf(block.id), entry);
         }
         return palette;

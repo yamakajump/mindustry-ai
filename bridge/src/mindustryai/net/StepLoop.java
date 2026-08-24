@@ -36,6 +36,7 @@ public class StepLoop implements ApplicationListener {
     private final ObservationEncoder encoder = new ObservationEncoder();
     private final ActionExecutor actions = new ActionExecutor();
     private final MapExporter exporter = new MapExporter();
+    private final SceneEncoder scenes = new SceneEncoder();
 
     /**
      * The agent's body, when it plays as a player rather than editing the world.
@@ -151,6 +152,7 @@ public class StepLoop implements ApplicationListener {
                 case "map" -> handleMap();
                 case "sector" -> handleSector(message);
                 case "observe" -> respond(observation(false));
+                case "scene" -> handleScene();
                 case "close" -> handleClose();
                 default -> server.reply(error("unknown command: " + command.asString()));
             }
@@ -204,6 +206,7 @@ public class StepLoop implements ApplicationListener {
         }
 
         encoder.rebuild();
+        scenes.reset();
         freeze();
         respond(observation(false));
     }
@@ -257,6 +260,19 @@ public class StepLoop implements ApplicationListener {
         reply.put("ok", true);
         reply.put("affordable", actions.affordableBlocks());
         server.reply(reply.toString());
+    }
+
+    /**
+     * Everything that moved since the last call: units, buildings, shots.
+     *
+     * <p>Separate from the observation because the two have different audiences and
+     * different costs. The observation is what the policy consumes on every step of
+     * every environment; this is what a person watching one match consumes, and asking
+     * for it on a match nobody is looking at would be pure waste.
+     */
+    private void handleScene() {
+        int agent = body != null && body.unit() != null ? body.unit().id() : -1;
+        server.reply(scenes.encode(agent).toString());
     }
 
     /**
@@ -319,6 +335,7 @@ public class StepLoop implements ApplicationListener {
         applyLoadout(message.get("loadout"));
 
         encoder.rebuild();
+        scenes.reset();
         freeze();
         respond(observation(false));
     }

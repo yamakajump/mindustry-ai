@@ -6,175 +6,348 @@
 <title>mindustry-ai training</title>
 <style>
   :root {
-    --bg: #0e0e14; --panel: #16161f; --line: #262633;
-    --text: #eae8e4; --muted: #8a8797; --accent: #ffd37f;
-    --good: #7ddc9a; --bad: #e8737d; --ore: #d99d73;
+    /* Semantic tokens rather than raw hex at the point of use, so a colour means the
+       same thing everywhere and dark mode is the design rather than an inversion. */
+    --bg: #0b0b10; --panel: #14141d; --raised: #1c1c28; --line: #2a2a3a;
+    --text: #f2f0ec; --muted: #a09db0; --faint: #6c6a7d;
+    --accent: #ffcf6b; --ally: #79c0ff; --enemy: #ff7b72; --good: #79dd9a; --bad: #ff7b72;
+    --ore: #e0a97a;
+
+    --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
+    --radius: 10px;
+    --z-header: 5; --z-overlay: 40;
   }
   * { box-sizing: border-box; }
+  html { color-scheme: dark; }
   body {
     margin: 0; background: var(--bg); color: var(--text);
-    font: 13px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   }
-  header {
-    padding: 11px 18px; border-bottom: 1px solid var(--line);
-    display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
-    position: sticky; top: 0; background: var(--bg); z-index: 5;
-  }
-  h1 { font-size: 15px; margin: 0; color: var(--accent); font-weight: 600; }
-  .stat { display: flex; flex-direction: column; }
-  .stat b { font-size: 17px; font-weight: 600; }
-  .stat span { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .07em; }
-  .right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); animation: pulse 1.6s infinite; }
-  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
-  #lang {
-    background: var(--line); color: var(--text); border: 0;
-    padding: 5px 10px; border-radius: 4px; cursor: pointer; font: inherit;
-  }
+  /* Data reads as data: fixed-width digits stop numbers jittering as they tick. */
+  .num, .stat b, .row span:last-child, td { font-variant-numeric: tabular-nums;
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
 
-  main { padding: 16px; display: grid; grid-template-columns: 1fr 320px; gap: 16px; align-items: start; }
-  @media (max-width: 1100px) { main { grid-template-columns: 1fr } }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+  button { font: inherit; cursor: pointer; }
 
-  #matches { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; }
+  /* Header ------------------------------------------------------------------ */
+  header.top {
+    padding: var(--s3) var(--s4); border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: var(--s5); flex-wrap: wrap;
+    position: sticky; top: 0; background: rgba(11,11,16,.96); z-index: var(--z-header);
+    backdrop-filter: blur(8px);
+  }
+  .brand { display: flex; align-items: center; gap: var(--s2); }
+  .brand h1 { font-size: 15px; margin: 0; color: var(--accent); font-weight: 700; letter-spacing: .02em; }
+  .stat { display: flex; flex-direction: column; min-width: 58px; }
+  .stat b { font-size: 18px; font-weight: 600; line-height: 1.2; }
+  .stat span { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+  .right { margin-left: auto; display: flex; align-items: center; gap: var(--s3); }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; background: var(--raised);
+    border: 1px solid var(--line); border-radius: 999px; padding: 5px 11px; font-size: 12px;
+    color: var(--muted);
+  }
+  .pill.live { color: var(--good); border-color: rgba(121,221,154,.4); }
+  .pill.down { color: var(--bad); border-color: rgba(255,123,114,.4); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .pill.live .dot { animation: pulse 1.8s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .3 } }
+  .ghost {
+    background: var(--raised); color: var(--text); border: 1px solid var(--line);
+    padding: 6px 12px; border-radius: 7px; transition: border-color .18s, background .18s;
+  }
+  .ghost:hover { border-color: var(--accent); }
+
+  /* Explainer --------------------------------------------------------------- */
+  .lede {
+    margin: var(--s4) var(--s4) 0; padding: var(--s3) var(--s4);
+    background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    border-radius: var(--radius); color: var(--muted); font-size: 13px; max-width: 100ch;
+  }
+  .lede b { color: var(--text); font-weight: 600; }
+
+  main { padding: var(--s4); display: grid; grid-template-columns: minmax(0,1fr) 340px; gap: var(--s4); align-items: start; }
+  @media (max-width: 1180px) { main { grid-template-columns: minmax(0,1fr) } }
+
+  /* Match cards ------------------------------------------------------------- */
+  /* auto-fill, not auto-fit: with two matches running, auto-fit would stretch each card
+     to half the screen and turn a glance into a scroll. */
+  #matches { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--s3); }
   .match {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
-    padding: 12px; display: flex; flex-direction: column; gap: 8px; cursor: pointer;
-    transition: border-color .15s;
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: var(--s3); display: flex; flex-direction: column; gap: var(--s2);
+    transition: border-color .18s, transform .18s; text-align: left; width: 100%;
+    color: inherit;
   }
+  .match { max-width: 480px; }
   .match:hover { border-color: var(--accent); }
-  .match.dead { opacity: .4; }
-  .match header { padding: 0; border: 0; position: static; background: none; display: flex; align-items: baseline; gap: 8px; }
-  .policy { color: var(--accent); font-weight: 600; }
-  .badge { font-size: 10px; padding: 1px 7px; border-radius: 10px; background: var(--line); color: var(--muted); text-transform: uppercase; }
-  canvas.map { width: 100%; height: 170px; background: #05050a; border-radius: 5px; display: block; image-rendering: pixelated; }
-  .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
-  .bar i { display: block; height: 100%; background: var(--accent); transition: width .25s; }
-  .rows { display: grid; grid-template-columns: 1fr 1fr; gap: 1px 12px; }
-  .row { display: flex; justify-content: space-between; }
-  .row span:first-child { color: var(--muted); }
-  .watch {
-    background: rgba(125,220,154,.12); border: 1px solid rgba(125,220,154,.35);
-    color: var(--good); border-radius: 5px; padding: 5px 8px; font-size: 12px;
-    display: none;
+  .match:active { transform: scale(.995); }
+  .match.dead { opacity: .45; }
+  .match .head { display: flex; align-items: center; gap: var(--s2); }
+  .policy { color: var(--accent); font-weight: 700; }
+  .badge {
+    font-size: 10px; padding: 2px 8px; border-radius: 999px; background: var(--raised);
+    color: var(--muted); text-transform: uppercase; letter-spacing: .06em; border: 1px solid var(--line);
   }
-  .watch.on { display: block; }
-  .watch b { color: var(--text); }
-  .items { display: flex; flex-wrap: wrap; gap: 5px; }
-  .item { background: var(--line); border-radius: 4px; padding: 1px 7px; }
-  .item b { color: var(--ore); font-weight: 600; }
+  .badge.act { margin-left: auto; color: var(--ally); border-color: rgba(121,192,255,.35); }
+  /* Square, because the maps are. A wider canvas would letterbox the whole map. */
+  canvas.map {
+    width: 100%; aspect-ratio: 1/1; background: #05050a; border-radius: 7px;
+    display: block; image-rendering: pixelated;
+  }
+  .bar { height: 7px; background: var(--raised); border-radius: 4px; overflow: hidden; border: 1px solid var(--line); }
+  .bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), #ffb347); transition: width .3s ease-out; }
+  .rows { display: grid; grid-template-columns: 1fr 1fr; gap: 2px var(--s3); font-size: 12.5px; }
+  .row { display: flex; justify-content: space-between; gap: var(--s2); }
+  .row > span:first-child { color: var(--muted); }
+  .join {
+    background: rgba(121,221,154,.1); border: 1px solid rgba(121,221,154,.32);
+    color: var(--good); border-radius: 7px; padding: 6px 9px; font-size: 12px; display: none;
+  }
+  .join.on { display: flex; align-items: center; gap: 6px; }
+  .join b { color: var(--text); font-family: ui-monospace, monospace; }
+  .items { display: flex; flex-wrap: wrap; gap: var(--s1); }
+  .item { background: var(--raised); border: 1px solid var(--line); border-radius: 5px; padding: 1px 7px; font-size: 12px; }
+  .item b { color: var(--ore); font-weight: 700; font-variant-numeric: tabular-nums; }
 
-  aside { display: flex; flex-direction: column; gap: 14px; position: sticky; top: 72px; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
-  .card h2 { font-size: 10px; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); margin: 0 0 9px; font-weight: 600; }
-  ol { margin: 0; padding-left: 20px; }
-  ol li b { color: var(--accent); }
-  .empty { color: var(--muted); padding: 24px; text-align: center; }
+  /* Side panels ------------------------------------------------------------- */
+  aside { display: flex; flex-direction: column; gap: var(--s3); position: sticky; top: 76px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: var(--s3); }
+  .card h2 {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted);
+    margin: 0 0 var(--s2); font-weight: 700; display: flex; align-items: center; gap: 6px;
+  }
+  .card h2 svg { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 2; }
+  .hint { color: var(--faint); font-size: 11.5px; margin-top: var(--s2); line-height: 1.45; }
+  .empty { color: var(--faint); padding: var(--s5) var(--s3); text-align: center; font-size: 12.5px; }
 
-  /* Detail view: the same match, big enough to actually watch. */
+  .legend { display: grid; gap: 5px; font-size: 12.5px; }
+  .legend div { display: flex; align-items: center; gap: var(--s2); color: var(--muted); }
+  .key { width: 14px; height: 14px; border-radius: 3px; flex: none; display: grid; place-items: center; }
+  .key.ally { background: rgba(121,192,255,.2); border: 1.5px solid var(--ally); border-radius: 50%; }
+  .key.enemy { background: rgba(255,123,114,.2); border: 1.5px solid var(--enemy); }
+  .key.built { background: rgba(255,207,107,.25); border: 1.5px solid var(--accent); }
+  .key.wip { background: repeating-linear-gradient(45deg, transparent, transparent 3px, var(--accent) 3px, var(--accent) 5px); border: 1.5px dashed var(--accent); }
+
+  table.gens { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.gens th { text-align: left; color: var(--faint); font-weight: 600; font-size: 10px;
+    text-transform: uppercase; letter-spacing: .07em; padding-bottom: 5px; }
+  table.gens td { padding: 4px 0; border-top: 1px solid var(--line); }
+  table.gens td:last-child, table.gens th:last-child { text-align: right; }
+  .best { color: var(--accent); font-weight: 700; }
+  .tag-best { background: rgba(255,207,107,.16); color: var(--accent); border: 1px solid rgba(255,207,107,.4);
+    border-radius: 999px; padding: 0 7px; font-size: 10px; margin-left: 5px; }
+
+  ol.board { margin: 0; padding-left: 20px; font-size: 12.5px; }
+  ol.board li { padding: 2px 0; }
+  ol.board b { color: var(--accent); }
+
+  a.replay {
+    display: flex; align-items: center; gap: var(--s2); padding: 6px var(--s2); border-radius: 6px;
+    color: var(--text); text-decoration: none; font-size: 12.5px; border: 1px solid transparent;
+    transition: background .18s, border-color .18s;
+  }
+  a.replay:hover { background: var(--raised); border-color: var(--line); }
+  a.replay svg { width: 13px; height: 13px; stroke: var(--muted); fill: none; stroke-width: 2; flex: none; }
+  a.replay .rw { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+  a.replay.solved .rw { color: var(--good); }
+
+  /* Detail overlay ---------------------------------------------------------- */
   #detail {
-    position: fixed; inset: 0; background: rgba(6,6,10,.94); z-index: 20;
-    display: none; flex-direction: column; padding: 16px;
+    position: fixed; inset: 0; background: rgba(5,5,9,.95); z-index: var(--z-overlay);
+    display: none; flex-direction: column; padding: var(--s4); gap: var(--s3);
   }
   #detail.open { display: flex; }
-  #detail header { background: none; border: 0; position: static; padding: 0 0 10px; }
-  #detail canvas { flex: 1; width: 100%; background: #05050a; border-radius: 6px; image-rendering: pixelated; }
-  #detail .strip { display: flex; gap: 22px; padding-top: 10px; flex-wrap: wrap; }
-  .close { margin-left: auto; background: var(--line); border: 0; color: var(--text); padding: 6px 14px; border-radius: 4px; cursor: pointer; font: inherit; }
+  #detail .head { display: flex; align-items: center; gap: var(--s3); }
+  #detail h2 { margin: 0; font-size: 16px; color: var(--accent); }
+  #detail canvas {
+    flex: 1; min-height: 0; width: 100%; background: #05050a; border-radius: var(--radius);
+    image-rendering: pixelated; cursor: grab; touch-action: none;
+  }
+  #detail canvas.dragging { cursor: grabbing; }
+  #detail .controls { display: flex; align-items: center; gap: var(--s2); }
+  #d-follow[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+  #detail .strip { display: flex; gap: var(--s5); flex-wrap: wrap; align-items: center; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+  }
 </style>
 </head>
 <body>
-<header>
-  <h1>mindustry-ai</h1>
+
+<header class="top">
+  <div class="brand">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ffcf6b" stroke-width="2" aria-hidden="true">
+      <path d="M12 2 3 7v10l9 5 9-5V7z"/><path d="M12 22V12M3 7l9 5 9-5"/>
+    </svg>
+    <h1>mindustry-ai</h1>
+  </div>
   <div class="stat"><b id="s-task">-</b><span data-i18n="task">task</span></div>
-  <div class="stat"><b id="s-matches">0</b><span data-i18n="matches">matches</span></div>
-  <div class="stat"><b id="s-episodes">0</b><span data-i18n="episodes">episodes</span></div>
-  <div class="stat"><b id="s-updates">0</b><span data-i18n="generations">generations</span></div>
-  <div class="stat"><b id="s-bestwave">0</b><span data-i18n="bestWave">best wave</span></div>
-  <div class="stat"><b id="s-sps">0</b><span data-i18n="stepsPerSecond">steps/s</span></div>
-  <div class="stat"><b id="s-elapsed">0s</b><span data-i18n="elapsed">elapsed</span></div>
+  <div class="stat"><b id="s-matches" class="num">0</b><span data-i18n="matches">matches</span></div>
+  <div class="stat"><b id="s-episodes" class="num">0</b><span data-i18n="episodes">episodes</span></div>
+  <div class="stat"><b id="s-updates" class="num">0</b><span data-i18n="generations">generations</span></div>
+  <div class="stat"><b id="s-bestwave" class="num">0</b><span data-i18n="bestWave">best wave</span></div>
+  <div class="stat"><b id="s-sps" class="num">0</b><span data-i18n="stepsPerSecond">steps/s</span></div>
+  <div class="stat"><b id="s-elapsed" class="num">0s</b><span data-i18n="elapsed">elapsed</span></div>
   <div class="right">
-    <button id="lang">FR</button>
-    <span class="dot"></span><span id="s-live" data-i18n="connecting">connecting</span>
+    <button id="lang" class="ghost" aria-label="Switch language">FR</button>
+    <span class="pill" id="s-live"><span class="dot"></span><span data-i18n="connecting">connecting</span></span>
   </div>
 </header>
 
+<p class="lede" id="lede"></p>
+
 <main>
   <div id="matches"><div class="empty" data-i18n="waiting">waiting for matches...</div></div>
+
   <aside>
     <div class="card">
-      <h2 data-i18n="objective">Objective</h2>
+      <h2><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/></svg>
+        <span data-i18n="objective">Objective</span></h2>
       <div id="s-objective">-</div>
     </div>
+
     <div class="card">
-      <h2 data-i18n="learningCurve">Learning curve</h2>
-      <canvas id="learning" height="150"></canvas>
-      <div class="row" style="margin-top:7px"><span data-i18n="meanReward">mean reward</span><span id="s-curmean">-</span></div>
-      <div class="row"><span data-i18n="vsFirst">vs first generation</span><span id="s-delta">-</span></div>
-      <div class="row"><span data-i18n="entropy">entropy</span><span id="s-entropy">-</span></div>
+      <h2><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 14l4-5 3 3 5-7"/></svg>
+        <span data-i18n="learningCurve">Learning curve</span></h2>
+      <canvas id="learning" height="150" role="img" aria-label="Reward per generation"></canvas>
+      <div class="row"><span data-i18n="meanReward">mean reward</span><span id="s-curmean" class="num">-</span></div>
+      <div class="row"><span data-i18n="vsFirst">vs first generation</span><span id="s-delta" class="num">-</span></div>
+      <div class="row"><span data-i18n="entropy">exploration</span><span id="s-entropy" class="num">-</span></div>
+      <p class="hint" data-i18n="curveHint"></p>
     </div>
+
     <div class="card">
-      <h2 data-i18n="leaderboard">Leaderboard</h2>
-      <ol id="s-leaderboard"><li class="empty" data-i18n="noResults">no results yet</li></ol>
+      <h2><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
+        <span data-i18n="versions">Saved versions</span></h2>
+      <div id="s-versions"><div class="empty" data-i18n="noVersions">no version saved yet</div></div>
+      <p class="hint" data-i18n="versionHint"></p>
+    </div>
+
+    <div class="card">
+      <h2><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 9l5 3-5 3z"/></svg>
+        <span data-i18n="replays">Replays</span></h2>
+      <div id="s-replays"><div class="empty" data-i18n="noReplays">no replay recorded yet</div></div>
+    </div>
+
+    <div class="card">
+      <h2><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/></svg>
+        <span data-i18n="leaderboard">Leaderboard</span></h2>
+      <ol class="board" id="s-leaderboard"><li class="empty" data-i18n="noResults">no results yet</li></ol>
+    </div>
+
+    <div class="card">
+      <h2><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
+        <span data-i18n="legend">What you are looking at</span></h2>
+      <div class="legend">
+        <div><span class="key ally"></span><span data-i18n="legendAlly"></span></div>
+        <div><span class="key enemy"></span><span data-i18n="legendEnemy"></span></div>
+        <div><span class="key built"></span><span data-i18n="legendBuilt"></span></div>
+        <div><span class="key wip"></span><span data-i18n="legendWip"></span></div>
+      </div>
     </div>
   </aside>
 </main>
 
-<div id="detail">
-  <header>
-    <h1 id="d-title">match</h1>
-    <button class="close" id="d-close" data-i18n="close">close</button>
-  </header>
+<div id="detail" role="dialog" aria-modal="true" aria-labelledby="d-title">
+  <div class="head">
+    <h2 id="d-title">match</h2>
+    <span class="badge" id="d-wavecount"></span>
+    <div class="controls">
+      <button class="ghost" id="d-follow" aria-pressed="true"><span data-i18n="follow">follow the bot</span></button>
+      <button class="ghost" id="d-out" aria-label="zoom out">&minus;</button>
+      <button class="ghost" id="d-in" aria-label="zoom in">+</button>
+      <span class="hint" id="d-hint" style="margin:0"></span>
+    </div>
+    <button class="ghost" id="d-close" style="margin-left:auto" data-i18n="close">close</button>
+  </div>
   <canvas id="d-canvas"></canvas>
   <div class="strip">
-    <div class="stat"><b id="d-step">0</b><span data-i18n="step">step</span></div>
-    <div class="stat"><b id="d-wave">0</b><span data-i18n="wave">wave</span></div>
-    <div class="stat"><b id="d-reward">0</b><span data-i18n="reward">reward</span></div>
-    <div class="stat"><b id="d-built">0</b><span data-i18n="built">built</span></div>
+    <div class="stat"><b id="d-step" class="num">0</b><span data-i18n="step">step</span></div>
+    <div class="stat"><b id="d-wave" class="num">0</b><span data-i18n="wave">wave</span></div>
+    <div class="stat"><b id="d-reward" class="num">0</b><span data-i18n="reward">reward</span></div>
+    <div class="stat"><b id="d-built" class="num">0</b><span data-i18n="built">built</span></div>
+    <div class="stat"><b id="d-units" class="num">0</b><span data-i18n="units">units</span></div>
     <div class="stat"><b id="d-action">-</b><span data-i18n="action">action</span></div>
     <div class="stat"><b id="d-items">-</b><span data-i18n="core">core</span></div>
   </div>
 </div>
 
 <script>
-// Interface language -----------------------------------------------------------
+"use strict";
+
+// Language ---------------------------------------------------------------------
 const STRINGS = {
-  en: { task:"task", matches:"matches", episodes:"episodes", generations:"generations",
-        bestWave:"best wave", stepsPerSecond:"steps/s", elapsed:"elapsed",
-        connecting:"connecting", live:"live", disconnected:"disconnected",
-        waiting:"waiting for matches...", objective:"Objective",
-        learningCurve:"Learning curve", meanReward:"mean reward",
-        vsFirst:"vs first generation", entropy:"entropy", leaderboard:"Leaderboard",
-        noResults:"no results yet", close:"close", step:"step", wave:"wave",
-        reward:"reward", built:"built", action:"action", core:"core", solved:"solved",
-        watchInGame:"Join in Mindustry:", realGame:"Watch in the real game" },
-  fr: { task:"tâche", matches:"parties", episodes:"épisodes", generations:"générations",
-        bestWave:"meilleure vague", stepsPerSecond:"pas/s", elapsed:"durée",
-        connecting:"connexion", live:"en direct", disconnected:"déconnecté",
-        waiting:"en attente des parties...", objective:"Objectif",
-        learningCurve:"Courbe d'apprentissage", meanReward:"récompense moyenne",
-        vsFirst:"vs première génération", entropy:"entropie", leaderboard:"Classement",
-        noResults:"aucun résultat", close:"fermer", step:"pas", wave:"vague",
-        reward:"récompense", built:"construit", action:"action", core:"core", solved:"résolus",
-        watchInGame:"Rejoindre dans Mindustry :", realGame:"Voir dans le vrai jeu" },
+  en: {
+    task:"task", matches:"matches", episodes:"episodes", generations:"generations",
+    bestWave:"best wave", stepsPerSecond:"steps/s", elapsed:"elapsed",
+    connecting:"connecting", live:"live", disconnected:"disconnected",
+    waiting:"waiting for matches...", objective:"Objective",
+    learningCurve:"Learning curve", meanReward:"mean reward",
+    vsFirst:"vs first generation", entropy:"exploration", leaderboard:"Leaderboard",
+    noResults:"no results yet", close:"close", step:"step", wave:"wave",
+    reward:"reward", built:"built", units:"units", action:"action", core:"core", solved:"solved",
+    joinInGame:"Join in Mindustry:", versions:"Saved versions", replays:"Replays",
+    noVersions:"no version saved yet", noReplays:"no replay recorded yet",
+    legend:"What you are looking at",
+    legendAlly:"the agent and its allies", legendEnemy:"enemies arriving in waves",
+    legendBuilt:"buildings, drawn with the game sprites",
+    legendWip:"under construction, hatched until finished",
+    lede:"Every panel below is one match being played right now. The agent flies, mines, builds and defends under the same rules a player has. It gets a little better every <b>generation</b>, and each generation worth keeping is saved as a version you can replay.",
+    curveHint:"Reward per generation. Rising means the agent is learning; exploration falling to zero means it stopped trying new things.",
+    versionHint:"Best is chosen on the average across a generation, not on one lucky episode.",
+    gen:"gen", mean:"mean", episodesShort:"eps", waves:"waves",
+    follow:"follow the bot", cameraHint:"drag to move, wheel to zoom, F to follow",
+    needGenerations:"first episodes still running...",
+  },
+  fr: {
+    task:"tâche", matches:"parties", episodes:"épisodes", generations:"générations",
+    bestWave:"meilleure vague", stepsPerSecond:"pas/s", elapsed:"durée",
+    connecting:"connexion", live:"en direct", disconnected:"déconnecté",
+    waiting:"en attente des parties...", objective:"Objectif",
+    learningCurve:"Courbe d'apprentissage", meanReward:"récompense moyenne",
+    vsFirst:"vs première génération", entropy:"exploration", leaderboard:"Classement",
+    noResults:"aucun résultat", close:"fermer", step:"pas", wave:"vague",
+    reward:"récompense", built:"construit", units:"unités", action:"action", core:"core", solved:"résolus",
+    joinInGame:"Rejoindre dans Mindustry :", versions:"Versions sauvegardées", replays:"Replays",
+    noVersions:"aucune version sauvegardée", noReplays:"aucun replay enregistré",
+    legend:"Ce que tu regardes",
+    legendAlly:"l'agent et ses alliés", legendEnemy:"les ennemis qui arrivent en vagues",
+    legendBuilt:"les bâtiments, avec les sprites du jeu",
+    legendWip:"en construction, hachuré tant que ce n'est pas fini",
+    lede:"Chaque panneau ci-dessous est une partie jouée en ce moment. L'agent vole, mine, construit et se défend avec les mêmes règles qu'un joueur. Il s'améliore un peu à chaque <b>génération</b>, et chaque génération qui vaut le coup est sauvegardée en version rejouable.",
+    curveHint:"Récompense par génération. Ça monte, il apprend. L'exploration qui tombe à zéro veut dire qu'il n'essaie plus rien de neuf.",
+    versionHint:"La meilleure est choisie sur la moyenne d'une génération, pas sur un épisode chanceux.",
+    gen:"gén", mean:"moy", episodesShort:"éps", waves:"vagues",
+    follow:"suivre le bot", cameraHint:"glisser pour déplacer, molette pour zoomer, F pour suivre",
+    needGenerations:"premiers épisodes en cours...",
+  },
 };
 let lang = localStorage.getItem("lang") || "en";
+const t = key => (STRINGS[lang] && STRINGS[lang][key]) || key;
 
 function applyLanguage() {
   document.documentElement.lang = lang;
   document.getElementById("lang").textContent = lang === "en" ? "FR" : "EN";
   for (const node of document.querySelectorAll("[data-i18n]")) {
-    const key = node.dataset.i18n;
-    if (STRINGS[lang][key]) node.textContent = STRINGS[lang][key];
+    const value = STRINGS[lang][node.dataset.i18n];
+    if (value !== undefined) node.textContent = value;
   }
-  // Cards carry translated labels of their own, so they are rebuilt on a change.
+  document.getElementById("lede").innerHTML = t("lede");
+  document.getElementById("d-hint").textContent = t("cameraHint");
   for (const card of cards.values()) card.remove();
   cards.clear();
 }
-const t = key => (STRINGS[lang] && STRINGS[lang][key]) || key;
+document.getElementById("lang").onclick = () => {
+  lang = lang === "en" ? "fr" : "en";
+  localStorage.setItem("lang", lang);
+  applyLanguage();
+};
 
 // Sprites ----------------------------------------------------------------------
 let atlas = null, atlasIndex = null;
-const terrains = new Map();     // match index -> decoded map
 const cards = new Map();
 let detailIndex = null;
 
@@ -187,9 +360,33 @@ async function loadAtlas() {
     atlas = image;
     atlasIndex = meta.sprites;
   } catch {
-    // No atlas: fall back to flat colours rather than showing nothing at all.
-    atlasIndex = false;
+    atlasIndex = false;   // Flat colours beat an empty screen.
   }
+}
+const spriteOf = name => (atlasIndex && name) ? (atlasIndex[name] || null) : null;
+
+/**
+ * Scramble a tile index into a variant choice.
+ *
+ * Mindustry seeds its own generator from the tile position and picks one of the floor
+ * variants with it, which is why its ground has no visible weave. The exact sequence is
+ * not reproduced here: matching arc's generator would cost 64-bit arithmetic per tile for
+ * a picture nobody can tell apart. What matters is that the choice is stable per tile and
+ * evenly spread, and a hash gives both.
+ */
+function tileHash(n) {
+  n = (n ^ 61) ^ (n >>> 16);
+  n = (n + (n << 3)) | 0;
+  n = n ^ (n >>> 4);
+  n = Math.imul(n, 0x27d4eb2d);
+  return (n ^ (n >>> 15)) >>> 0;
+}
+
+/** The variant of a sprite this tile should use. */
+function frameOf(entry, tile) {
+  const frames = entry.frames;
+  if (!frames || frames.length < 2) return entry;
+  return frames[tileHash(tile) % frames.length];
 }
 
 async function inflate(b64) {
@@ -198,14 +395,16 @@ async function inflate(b64) {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
-/** Fetch and decode a match's map. Cached until the episode changes it. */
-const pending = new Set();
+// Terrain ----------------------------------------------------------------------
+const terrains = new Map();
+const terrainPending = new Set();
+
 async function loadTerrain(index, version) {
   const known = terrains.get(index);
   if (known && known.version === version) return known;
-  if (pending.has(index)) return known || null;
+  if (terrainPending.has(index)) return known || null;
 
-  pending.add(index);
+  terrainPending.add(index);
   try {
     const data = await (await fetch(`terrain/${index}`, { cache: "no-store" })).json();
     const tiles = data.width * data.height;
@@ -217,22 +416,333 @@ async function loadTerrain(index, version) {
       floor: new Uint16Array(floor.buffer, floor.byteOffset, tiles),
       overlay: new Uint16Array(overlay.buffer, overlay.byteOffset, tiles),
       block: new Uint16Array(block.buffer, block.byteOffset, tiles),
+      layer: null, layerKey: "",
     };
     terrains.set(index, decoded);
     return decoded;
   } catch {
     return known || null;
   } finally {
-    pending.delete(index);
+    terrainPending.delete(index);
   }
 }
 
-const FALLBACK = { floor: "#22222b", solid: "#33333f", built: "#7ddc9a" };
+// The animated world -----------------------------------------------------------
+/**
+ * One match as it moves. The server sends what changed; this keeps the whole picture,
+ * and remembers where every unit was a moment ago so the renderer can interpolate
+ * instead of teleporting things ten tiles at a time.
+ */
+class World {
+  constructor() {
+    this.version = 0;
+    this.units = new Map();       // id -> {type, team, x, y, rot, hp, flags, fx, fy, frot}
+    this.buildings = new Map();   // tile -> {block, rot, team, hp, prog, bornAt, doneAt, hurtAt}
+    this.dying = new Map();       // tile -> {at, block}
+    this.shots = [];
+    this.blocks = {}; this.types = {};
+    this.erased = new Set(); this.erasedCount = 0;
+    this.agentId = -1;
+    this.tick = 0; this.wave = 0; this.waveTime = 0; this.enemies = 0;
+    this.width = 0; this.height = 0;
+    this.frameAt = 0; this.interval = 200;
+  }
 
-/** Draw one match with the game's own sprites when they are available. */
-function drawMap(canvas, match, terrain, zoom) {
+  reset() {
+    this.units.clear(); this.buildings.clear(); this.dying.clear();
+    this.erased.clear(); this.erasedCount++; this.shots = [];
+    this.version = 0;
+  }
+
+  apply(data, now) {
+    if (data.full) {
+      this.units.clear(); this.buildings.clear();
+      this.erased.clear(); this.erasedCount++;
+    }
+    this.version = data.version;
+    this.agentId = data.agent === undefined ? -1 : data.agent;
+    this.tick = data.tick; this.wave = data.wave;
+    this.waveTime = data.wave_time; this.enemies = data.enemies;
+    this.width = data.width; this.height = data.height;
+    Object.assign(this.blocks, data.blocks || {});
+    Object.assign(this.types, data.types || {});
+
+    // Frames arrive on a wall clock, not a fixed one, so the gap between the last two is
+    // the only honest guess at how long the next one has to be stretched over.
+    if (this.frameAt) this.interval = Math.min(1200, Math.max(60, now - this.frameAt));
+    this.frameAt = now;
+
+    const seen = new Set();
+    const u = data.units || [];
+    for (let i = 0; i + 8 < u.length; i += 9) {
+      const id = u[i];
+      seen.add(id);
+      const previous = this.units.get(id);
+      this.units.set(id, {
+        type: u[i + 1], team: u[i + 2], x: u[i + 3], y: u[i + 4],
+        rot: u[i + 5], hp: u[i + 6], flags: u[i + 7], mine: u[i + 8],
+        fx: previous ? previous.x : u[i + 3],
+        fy: previous ? previous.y : u[i + 4],
+        frot: previous ? previous.rot : u[i + 5],
+        seenAt: now,
+      });
+    }
+    for (const id of [...this.units.keys()]) if (!seen.has(id)) this.units.delete(id);
+
+    const placed = data.placed || [];
+    for (let i = 0; i + 5 < placed.length; i += 6) {
+      const tile = placed[i];
+      const previous = this.buildings.get(tile);
+      const prog = placed[i + 5];
+      const entry = {
+        block: placed[i + 1], rot: placed[i + 2], team: placed[i + 3],
+        hp: placed[i + 4], prog,
+        bornAt: previous ? previous.bornAt : now,
+        doneAt: previous ? previous.doneAt : 0,
+        hurtAt: previous ? previous.hurtAt : 0,
+      };
+      // A finished building gets one flash. Without the guard every delta would retrigger
+      // it and the whole base would strobe.
+      if (prog >= 100 && (!previous || previous.prog < 100)) entry.doneAt = now;
+      if (previous && placed[i + 4] < previous.hp) entry.hurtAt = now;
+      this.buildings.set(tile, entry);
+      this.dying.delete(tile);
+    }
+
+    for (const tile of data.removed || []) {
+      const gone = this.buildings.get(tile);
+      this.buildings.delete(tile);
+      this.dying.set(tile, { at: now, block: gone ? gone.block : 0 });
+      // Map blocks live in the terrain layer, so a destroyed one has to be painted out
+      // of it or the rubble keeps standing.
+      if (!this.erased.has(tile)) { this.erased.add(tile); this.erasedCount++; }
+    }
+
+    const shots = data.shots || [];
+    this.shots = [];
+    for (let i = 0; i + 3 < shots.length; i += 4) {
+      this.shots.push({ x: shots[i], y: shots[i + 1], rot: shots[i + 2], team: shots[i + 3] });
+    }
+  }
+
+  /** Drop the corpses and flashes that have finished playing. */
+  sweep(now) {
+    for (const [tile, entry] of this.dying) if (now - entry.at > 500) this.dying.delete(tile);
+  }
+}
+
+const worlds = new Map();
+const scenePending = new Set();
+const worldOf = index => {
+  if (!worlds.has(index)) worlds.set(index, new World());
+  return worlds.get(index);
+};
+
+async function pollScene(index) {
+  if (scenePending.has(index)) return;
+  scenePending.add(index);
+  try {
+    const world = worldOf(index);
+    const data = await (await fetch(`scene/${index}?since=${world.version}`, { cache: "no-store" })).json();
+    if (data.version !== world.version || data.full) world.apply(data, performance.now());
+  } catch {
+    // Silent: a missed frame is a stutter, and the next poll resynchronises.
+  } finally {
+    scenePending.delete(index);
+  }
+}
+
+// Rendering --------------------------------------------------------------------
+const FALLBACK = { floor: "#1b1b24", solid: "#2e2e3c", built: "#ffcf6b" };
+const TEAM_SHARDED = 1;   // The agent's own team on every map used here.
+
+/**
+ * Paint floors, ores and static map blocks once into an offscreen canvas.
+ *
+ * Redrawing eighty thousand tiles per frame is what would make six live matches
+ * unwatchable. The ground does not move, so it is painted when the view or the map
+ * changes and blitted the rest of the time.
+ */
+function terrainLayer(terrain, world, ox, oy, cols, rows, cell) {
+  const key = `${terrain.version}:${ox}:${oy}:${cols}:${rows}:${cell}:${world.erasedCount}`;
+  if (terrain.layerKey === key && terrain.layer) return terrain.layer;
+
+  const pxW = Math.ceil(cols * cell), pxH = Math.ceil(rows * cell);
+  const layer = terrain.layer && terrain.layer.width === pxW && terrain.layer.height === pxH
+    ? terrain.layer
+    : Object.assign(document.createElement("canvas"), { width: pxW, height: pxH });
+  const ctx = layer.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  ctx.fillStyle = "#05050a";
+  ctx.fillRect(0, 0, pxW, pxH);
+
+  const { width: mapW, height: mapH } = terrain;
+  const top = oy + rows - 1;
+  const nameOf = id => {
+    const entry = terrain.palette[String(id)];
+    return entry && entry.name !== "air" ? entry.name : null;
+  };
+
+  const paint = (id, x, y, tile, fallback) => {
+    const name = nameOf(id);
+    const s = name ? spriteOf(name) : null;
+    const px = (x - ox) * cell, py = (top - y) * cell;
+    if (s) {
+      const f = frameOf(s, tile);
+      const tiles = s.tiles || 1;
+      const offset = Math.floor((tiles - 1) / 2);
+      ctx.drawImage(atlas, f.x, f.y, f.w, f.h,
+        px - offset * cell, py - (tiles - 1 - offset) * cell, tiles * cell, tiles * cell);
+    } else if (fallback) {
+      ctx.fillStyle = fallback;
+      ctx.fillRect(px, py, cell, cell);
+    }
+  };
+
+  /**
+   * Blend a neighbouring floor over this tile, the way the engine does.
+   *
+   * Every floor ships a 3x3 sheet of fades, one per direction, and a floor bleeds onto
+   * whichever neighbour has the lower blend group. Without this every floor meets its
+   * neighbour on a hard staircase, which is the single thing that most makes an otherwise
+   * correct render look wrong.
+   *
+   * The sheet is laid out transposed and upside down relative to the obvious reading: its
+   * top-left cell carries the fade towards the south-east. Measured off the sprite rather
+   * than assumed, because assuming it produced a field of decorative hooks scattered at
+   * random.
+   */
+  const blend = (x, y) => {
+    const here = blendOf(terrain, terrain.floor[y * mapW + x]);
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= mapW || ny >= mapH) continue;
+        const other = terrain.floor[ny * mapW + nx];
+        if (blendOf(terrain, other) <= here) continue;
+        const sheet = spriteOf(nameOf(other) + "-edge");
+        if (!sheet || !sheet.grid) continue;
+
+        const unit = sheet.w / sheet.grid;
+        const col = 1 - dx, row = 1 + dy;
+        ctx.drawImage(atlas, sheet.x + col * unit, sheet.y + row * unit, unit, unit,
+          (x - ox) * cell, (top - y) * cell, cell, cell);
+      }
+    }
+  };
+
+  /**
+   * Static walls, drawn from the 2x2 sheet Mindustry covers a rock field with.
+   *
+   * A wall has only two variants, so tiling them alone lays down a checkerboard of the
+   * same two glyphs, which is what reads as broken artwork on a cliff. The engine instead
+   * stamps a two-by-two block of rock across aligned pairs of tiles, keeping the variants
+   * for the rest, and a field stops repeating.
+   */
+  const paintWall = (id, x, y, i) => {
+    const name = nameOf(id);
+    const sheet = name ? spriteOf(name + "-large") : null;
+    const bx = x - (x & 1), by = y - (y & 1);
+
+    const uniform = sheet && bx + 1 < mapW && by + 1 < mapH
+      && terrain.block[by * mapW + bx] === id
+      && terrain.block[by * mapW + bx + 1] === id
+      && terrain.block[(by + 1) * mapW + bx] === id
+      && terrain.block[(by + 1) * mapW + bx + 1] === id;
+
+    // Half the aligned blocks get the big rock, which is what breaks up the grid without
+    // erasing the variants entirely.
+    if (uniform && tileHash(by * mapW + bx) % 2 === 0) {
+      const unit = sheet.w / sheet.grid;
+      // The sheet is the assembled rock, so a quadrant goes back where it came from:
+      // column with x, row against y.
+      const col = x - bx, row = 1 - (y - by);
+      ctx.drawImage(atlas, sheet.x + col * unit, sheet.y + row * unit, unit, unit,
+        (x - ox) * cell, (top - y) * cell, cell, cell);
+      return;
+    }
+    paint(id, x, y, i * 17 + 3, FALLBACK.solid);
+  };
+
+  // Edges are three pixels of gradient. Below a handful of pixels per tile they cost half
+  // a million lookups to draw nothing anyone can see.
+  const blending = cell >= 4;
+
+  for (let y = Math.max(0, oy); y <= Math.min(mapH - 1, oy + rows - 1); y++) {
+    for (let x = Math.max(0, ox); x <= Math.min(mapW - 1, ox + cols - 1); x++) {
+      const i = y * mapW + x;
+      paint(terrain.floor[i], x, y, i, FALLBACK.floor);
+      if (blending) blend(x, y);
+      if (terrain.overlay[i]) paint(terrain.overlay[i], x, y, i * 31 + 7, null);
+      if (terrain.block[i] && !world.erased.has(i)) paintWall(terrain.block[i], x, y, i);
+    }
+  }
+
+  terrain.layer = layer;
+  terrain.layerKey = key;
+  return layer;
+}
+
+/**
+ * Which floor wins where two meet.
+ *
+ * The engine decides on the blend group, not the block id, and the two disagree often
+ * enough that using the id blends a good part of the map the wrong way round. The id is
+ * only the fallback for a map exported before the group was sent.
+ */
+function blendOf(terrain, id) {
+  const entry = terrain.palette[String(id)];
+  return entry && entry.blend !== undefined ? entry.blend : id;
+}
+
+const lerp = (a, b, k) => a + (b - a) * k;
+function lerpAngle(a, b, k) {
+  let d = ((b - a + 540) % 360) - 180;
+  return a + d * k;
+}
+
+/**
+ * Draw one match: the ground, then everything alive on top of it.
+ *
+ * `zoom` is the number of tiles across. Zero means the whole map, which is what a card
+ * wants; a number means follow the agent, which is what the detail view wants.
+ */
+/**
+ * Where the detail view is looking.
+ *
+ * Kept outside the render so dragging survives a redraw, and eased rather than snapped:
+ * the agent teleports between mining targets several times a second, and a camera nailed
+ * to it makes the whole map lurch every time it changes its mind.
+ */
+const camera = { x: 0, y: 0, span: 70, follow: true, dragging: false, at: 0 };
+
+const CAMERA = { min: 18, max: 220, deadzone: 0.18, ease: 3.5 };
+
+function followAgent(world, match, now) {
+  const dt = camera.at ? Math.min(0.2, (now - camera.at) / 1000) : 0;
+  camera.at = now;
+  if (!camera.follow || camera.dragging) return;
+
+  const agent = pickAgent(world, match);
+  const target = agent
+    ? { x: agent.x, y: agent.y }
+    : (match.core[0] >= 0 ? { x: match.core[0], y: match.core[1] } : null);
+  if (!target) return;
+
+  // A deadzone, so the picture only moves when the agent has actually gone somewhere.
+  const slack = camera.span * CAMERA.deadzone;
+  const dx = target.x - camera.x, dy = target.y - camera.y;
+  if (Math.abs(dx) < slack && Math.abs(dy) < slack) return;
+
+  const k = 1 - Math.exp(-CAMERA.ease * dt);
+  camera.x += dx * k;
+  camera.y += dy * k;
+}
+
+function drawMatch(canvas, match, terrain, world, zoom, now) {
   const ctx = canvas.getContext("2d");
-  const ratio = window.devicePixelRatio || 1;
+  const ratio = Math.min(2, window.devicePixelRatio || 1);
   const width = Math.max(1, Math.round(canvas.clientWidth * ratio));
   const height = Math.max(1, Math.round(canvas.clientHeight * ratio));
   if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
@@ -242,101 +752,244 @@ function drawMap(canvas, match, terrain, zoom) {
   ctx.fillRect(0, 0, width, height);
   if (!terrain) return;
 
-  const [coreX, coreY] = match.core;
   const mapW = terrain.width, mapH = terrain.height;
+  const alpha = Math.min(1, (now - world.frameAt) / world.interval);
 
-  // Zoomed views follow the agent, so the detail view shows the base rather than the map.
-  const span = zoom ? Math.min(zoom, Math.min(mapW, mapH)) : Math.max(mapW, mapH);
-  const unit = match.unit || {};
-  const centreX = zoom ? (unit.x !== undefined ? unit.x : (coreX >= 0 ? coreX : mapW / 2)) : mapW / 2;
-  const centreY = zoom ? (unit.y !== undefined ? unit.y : (coreY >= 0 ? coreY : mapH / 2)) : mapH / 2;
+  // The requested span is fitted on the short axis; the long one simply shows more of
+  // the map. Fitting a square viewport into a canvas that is not square is what leaves a
+  // black band down one side.
+  const span = zoom ? Math.min(camera.span, Math.max(mapW, mapH)) : Math.max(mapW, mapH);
+  // Snapped to whole device pixels when zoomed in. A fractional cell makes every tile
+  // sample its 32-pixel sprite at a different offset, and the interference between those
+  // offsets is the moire that reads as broken artwork. Left fractional when zoomed out,
+  // where rounding would cost whole tiles of the map for a pattern too small to see.
+  const exact = Math.min(width, height) / span;
+  const cell = zoom ? Math.max(1, Math.round(exact)) : exact;
+  const viewW = width / cell, viewH = height / cell;
 
-  const scale = Math.min(width, height) / span;
-  const originX = Math.max(0, Math.min(centreX - span / 2, mapW - span));
-  const originY = Math.max(0, Math.min(centreY - span / 2, mapH - span));
-  const put = (x, y) => [(x - originX) * scale, (mapH - 1 - y - originY) * scale];
+  const centreX = zoom ? camera.x : mapW / 2;
+  const centreY = zoom ? camera.y : mapH / 2;
 
-  const sprite = id => {
-    if (!atlasIndex) return null;
-    const entry = terrain.palette[String(id)];
-    if (!entry || entry.name === "air") return null;
-    return atlasIndex[entry.name] || null;
-  };
+  // Clamped to the map, unless the view is larger than the map, in which case it is
+  // centred and the surround is left black.
+  const clamp = (centre, view, extent) => view >= extent
+    ? (extent - view) / 2
+    : Math.max(0, Math.min(centre - view / 2, extent - view));
+  const rawX = clamp(centreX, viewW, mapW);
+  const rawY = clamp(centreY, viewH, mapH);
 
-  const minX = Math.max(0, Math.floor(originX)), maxX = Math.min(mapW - 1, Math.ceil(originX + span));
-  const minY = Math.max(0, Math.floor(originY)), maxY = Math.min(mapH - 1, Math.ceil(originY + span));
-  const cell = Math.max(1, Math.ceil(scale));
+  // The ground is cached on whole tiles and blitted at a fractional offset, so the camera
+  // moves smoothly without the map being repainted every frame.
+  const ox = Math.floor(rawX), oy = Math.floor(rawY);
+  const cols = Math.ceil(viewW) + 2, rows = Math.ceil(viewH) + 2;
+  const layer = terrainLayer(terrain, world, ox, oy, cols, rows, cell);
+  const blitX = (ox - rawX) * cell, blitY = (rawY + viewH - oy - rows) * cell;
+  ctx.drawImage(layer, zoom ? Math.round(blitX) : blitX, zoom ? Math.round(blitY) : blitY);
 
-  for (let y = minY; y <= maxY; y++) {
-    for (let x = minX; x <= maxX; x++) {
-      const i = y * mapW + x;
-      const [px, py] = put(x, y);
+  // World y points up, the canvas points down, hence the flip in `sy`.
+  const sx = wx => (wx - rawX) * cell;
+  const sy = wy => (rawY + viewH - 1 - wy) * cell;
 
-      const floorSprite = sprite(terrain.floor[i]);
-      if (floorSprite) {
-        ctx.drawImage(atlas, floorSprite.x, floorSprite.y, floorSprite.w, floorSprite.h, px, py, cell, cell);
-      } else {
-        ctx.fillStyle = FALLBACK.floor;
-        ctx.fillRect(px, py, cell, cell);
-      }
+  drawBuildings(ctx, world, { ox, oy, cols, rows, cell, sx, sy, now });
+  drawWrecks(ctx, world, { cell, sx, sy, now });
+  drawUnits(ctx, world, { cell, sx, sy, now, alpha });
+  drawShots(ctx, world, { cell, sx, sy });
 
-      const overlaySprite = sprite(terrain.overlay[i]);
-      if (overlaySprite) {
-        ctx.drawImage(atlas, overlaySprite.x, overlaySprite.y, overlaySprite.w, overlaySprite.h, px, py, cell, cell);
-      }
-
-      if (terrain.block[i]) {
-        const blockSprite = sprite(terrain.block[i]);
-        if (blockSprite) {
-          ctx.drawImage(atlas, blockSprite.x, blockSprite.y, blockSprite.w, blockSprite.h, px, py, cell, cell);
-        } else {
-          ctx.fillStyle = FALLBACK.solid;
-          ctx.fillRect(px, py, cell, cell);
-        }
-      }
-    }
+  if (match.core[0] >= 0) {
+    const cx = sx(match.core[0]) + cell / 2, cy = sy(match.core[1]) + cell / 2;
+    ctx.strokeStyle = "rgba(255,207,107,.55)";
+    ctx.lineWidth = Math.max(1, cell / 6);
+    ctx.strokeRect(cx - cell * 2, cy - cell * 2, cell * 4, cell * 4);
   }
+}
 
-  // What the agent built, drawn on top with its own sprite.
-  for (const entry of match.built) {
-    const bx = entry[0], by = entry[1], name = entry[2];
-    if (bx < minX || bx > maxX || by < minY || by > maxY) continue;
-    const [px, py] = put(bx, by);
-    const s = (atlasIndex && name) ? atlasIndex[name] : null;
+/**
+ * The unit the agent is flying.
+ *
+ * The bridge names it outright, because matching it by position against the slower state
+ * poll lost it whenever the two disagreed, and a camera that loses its subject three
+ * times a second is worse than one that never followed at all. Proximity remains the
+ * fallback for a match recorded before the id was sent.
+ */
+function pickAgent(world, match) {
+  if (world.agentId >= 0) {
+    const named = world.units.get(world.agentId);
+    if (named) return named;
+  }
+  const unit = (match && match.unit) || {};
+  if (unit.x === undefined) return null;
+  let best = null, bestDistance = Infinity;
+  for (const u of world.units.values()) {
+    if (u.team !== TEAM_SHARDED) continue;
+    const d = (u.x - unit.x) ** 2 + (u.y - unit.y) ** 2;
+    if (d < bestDistance) { bestDistance = d; best = u; }
+  }
+  return bestDistance < 9 ? best : null;
+}
+
+function drawBuildings(ctx, world, v) {
+  const { cell, sx, sy, now } = v;
+  for (const [tile, b] of world.buildings) {
+    const x = tile % world.width, y = Math.floor(tile / world.width);
+    if (x < v.ox - 2 || x > v.ox + v.cols + 2 || y < v.oy - 2 || y > v.oy + v.rows + 2) continue;
+
+    const info = world.blocks[String(b.block)];
+    const size = info ? (info.size || 1) : 1;
+    const offset = Math.floor((size - 1) / 2);
+    const left = sx(x - offset), topY = sy(y + size - 1 - offset);
+    const s = info ? spriteOf(info.name) : null;
+    const done = b.prog >= 100;
+
+    ctx.save();
+    if (!done) ctx.globalAlpha = 0.35 + 0.4 * (b.prog / 100);
+
     if (s) {
-      const size = cell * (s.tiles || 1);
-      ctx.drawImage(atlas, s.x, s.y, s.w, s.h, px, py, size, size);
+      const f = frameOf(s, tile);
+      // A drill is a base plus a translucent top, and a conveyor points where it was
+      // laid. Drawing the base alone leaves a hole where the machine should be.
+      const top = spriteOf(info.name + "-top");
+      if (info.rotate && b.rot) {
+        const cx = left + size * cell / 2, cy = topY + size * cell / 2;
+        ctx.translate(cx, cy);
+        ctx.rotate(-b.rot * Math.PI / 2);
+        ctx.drawImage(atlas, f.x, f.y, f.w, f.h, -size * cell / 2, -size * cell / 2, size * cell, size * cell);
+      } else {
+        ctx.drawImage(atlas, f.x, f.y, f.w, f.h, left, topY, size * cell, size * cell);
+        if (top) ctx.drawImage(atlas, top.x, top.y, top.w, top.h, left, topY, size * cell, size * cell);
+      }
     } else {
-      ctx.fillStyle = FALLBACK.built;
-      ctx.fillRect(px, py, cell, cell);
+      ctx.fillStyle = b.team === TEAM_SHARDED ? FALLBACK.built : "#8a4a4a";
+      ctx.fillRect(left, topY, size * cell, size * cell);
+    }
+    ctx.restore();
+
+    if (!done) {
+      // Hatching, so "not finished yet" reads without relying on colour alone.
+      ctx.save();
+      ctx.strokeStyle = "rgba(255,207,107,.85)";
+      ctx.lineWidth = Math.max(1, cell / 8);
+      ctx.setLineDash([cell / 3, cell / 3]);
+      ctx.strokeRect(left, topY, size * cell, size * cell);
+      ctx.restore();
+    } else if (now - b.doneAt < 320) {
+      const k = 1 - (now - b.doneAt) / 320;
+      ctx.strokeStyle = `rgba(255,255,255,${0.85 * k})`;
+      ctx.lineWidth = Math.max(1, cell / 5);
+      ctx.strokeRect(left, topY, size * cell, size * cell);
+    }
+
+    if (now - b.hurtAt < 260) {
+      const k = 1 - (now - b.hurtAt) / 260;
+      ctx.fillStyle = `rgba(255,80,70,${0.5 * k})`;
+      ctx.fillRect(left, topY, size * cell, size * cell);
+    }
+    if (b.hp < 100 && done) {
+      ctx.fillStyle = "rgba(0,0,0,.55)";
+      ctx.fillRect(left, topY - cell * 0.22, size * cell, cell * 0.16);
+      ctx.fillStyle = b.hp > 50 ? "#79dd9a" : "#ff7b72";
+      ctx.fillRect(left, topY - cell * 0.22, size * cell * b.hp / 100, cell * 0.16);
     }
   }
+}
 
-  if (coreX >= 0) {
-    const [cx, cy] = put(coreX, coreY);
-    ctx.strokeStyle = "rgba(255,211,127,.75)";
-    ctx.lineWidth = Math.max(1, scale / 3);
-    ctx.strokeRect(cx - scale * 1.5, cy - scale * 1.5, scale * 4, scale * 4);
-  }
-  if (unit.x !== undefined) {
-    const [ux, uy] = put(unit.x, unit.y);
-    ctx.strokeStyle = "#8fd0ff";
-    ctx.lineWidth = Math.max(1.5, scale / 3);
+/** A destroyed building leaves a brief flare, so losses are visible and not just absent. */
+function drawWrecks(ctx, world, v) {
+  const { cell, sx, sy, now } = v;
+  for (const [tile, wreck] of world.dying) {
+    const k = 1 - (now - wreck.at) / 500;
+    if (k <= 0) continue;
+    const x = tile % world.width, y = Math.floor(tile / world.width);
+    ctx.save();
+    ctx.globalAlpha = k;
+    ctx.strokeStyle = "#ff9b52";
+    ctx.lineWidth = Math.max(1, cell / 4);
     ctx.beginPath();
-    ctx.arc(ux, uy, Math.max(4, scale * 1.2), 0, Math.PI * 2);
+    ctx.arc(sx(x) + cell / 2, sy(y) + cell / 2, cell * (0.6 + 1.6 * (1 - k)), 0, Math.PI * 2);
     ctx.stroke();
-    if (unit.mining) { ctx.fillStyle = "rgba(143,208,255,.55)"; ctx.fill(); }
+    ctx.restore();
   }
+}
+
+function drawUnits(ctx, world, v) {
+  const { cell, sx, sy, alpha, now } = v;
+  for (const unit of world.units.values()) {
+    const x = lerp(unit.fx, unit.x, alpha), y = lerp(unit.fy, unit.y, alpha);
+    const rot = lerpAngle(unit.frot, unit.rot, alpha);
+    const ally = unit.team === TEAM_SHARDED;
+    const cx = sx(x) + cell / 2, cy = sy(y) + cell / 2;
+    const name = world.types[String(unit.type)];
+    const s = spriteOf(name);
+    const scale = Math.max(cell * 1.6, 7);
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    if (s) {
+      // Mindustry unit sprites point up; world rotation is degrees counterclockwise from
+      // east, and the canvas has y downwards, hence the flip and the quarter turn.
+      ctx.rotate((90 - rot) * Math.PI / 180);
+      ctx.drawImage(atlas, s.x, s.y, s.w, s.h, -scale / 2, -scale / 2, scale, scale);
+    } else {
+      ctx.fillStyle = ally ? "#79c0ff" : "#ff7b72";
+      ctx.beginPath();
+      ctx.arc(0, 0, scale / 2.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // A ring in the team colour, because at this scale the sprites of two teams are the
+    // same silhouette and colour alone inside the sprite is not readable.
+    ctx.strokeStyle = ally ? "rgba(121,192,255,.9)" : "rgba(255,123,114,.9)";
+    ctx.lineWidth = Math.max(1, cell / 5);
+    ctx.beginPath();
+    ctx.arc(cx, cy, scale * 0.62, 0, Math.PI * 2);
+    ctx.stroke();
+
+    if (unit.flags & 1 && unit.mine >= 0) {
+      const mx = sx(unit.mine % world.width) + cell / 2;
+      const my = sy(Math.floor(unit.mine / world.width)) + cell / 2;
+      ctx.strokeStyle = "rgba(224,169,122,.8)";
+      ctx.lineWidth = Math.max(1, cell / 6);
+      ctx.setLineDash([cell / 2, cell / 2]);
+      ctx.lineDashOffset = -(now / 40) % (cell);
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(mx, my); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    if (unit.hp < 100) {
+      ctx.fillStyle = "rgba(0,0,0,.6)";
+      ctx.fillRect(cx - scale / 2, cy - scale * 0.85, scale, Math.max(2, cell * 0.16));
+      ctx.fillStyle = unit.hp > 40 ? "#79dd9a" : "#ff7b72";
+      ctx.fillRect(cx - scale / 2, cy - scale * 0.85, scale * unit.hp / 100, Math.max(2, cell * 0.16));
+    }
+  }
+}
+
+function drawShots(ctx, world, v) {
+  const { cell, sx, sy } = v;
+  ctx.lineCap = "round";
+  for (const shot of world.shots) {
+    const cx = sx(shot.x) + cell / 2, cy = sy(shot.y) + cell / 2;
+    const angle = -shot.rot * Math.PI / 180;
+    const length = Math.max(3, cell * 1.1);
+    ctx.strokeStyle = shot.team === TEAM_SHARDED ? "rgba(160,220,255,.95)" : "rgba(255,180,120,.95)";
+    ctx.lineWidth = Math.max(1, cell / 3);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(angle) * length, cy + Math.sin(angle) * length);
+    ctx.stroke();
+  }
+  ctx.lineCap = "butt";
 }
 
 // Cards ------------------------------------------------------------------------
 function buildCard(match) {
-  const card = document.createElement("div");
+  const card = document.createElement("button");
   card.className = "match";
+  card.type = "button";
+  card.setAttribute("aria-label", `match ${match.index}`);
   card.innerHTML = `
-    <header><span class="policy"></span><span class="badge match-id"></span>
-      <span class="badge action" style="margin-left:auto"></span></header>
-    <div class="watch"></div>
+    <div class="head"><span class="policy"></span><span class="badge match-id"></span>
+      <span class="badge act"></span></div>
+    <div class="join"></div>
     <canvas class="map"></canvas>
     <div class="bar"><i></i></div>
     <div class="rows">
@@ -354,70 +1007,190 @@ function buildCard(match) {
 
 function updateCard(match) {
   const card = cards.get(match.index) || buildCard(match);
+  const world = worldOf(match.index);
   card.classList.toggle("dead", !match.alive);
   card.querySelector(".policy").textContent = match.policy;
   card.querySelector(".match-id").textContent = "#" + match.index;
-  card.querySelector(".action").textContent = match.action || "-";
+  card.querySelector(".act").textContent = match.action || "-";
   card.querySelector(".bar i").style.width = (match.progress * 100).toFixed(1) + "%";
   card.querySelector(".f-step").textContent = `${match.step}/${match.max_steps}`;
   card.querySelector(".f-wave").textContent = match.wave;
   const reward = card.querySelector(".f-reward");
   reward.textContent = match.reward.toFixed(2);
   reward.style.color = match.reward > 0 ? "var(--good)" : match.reward < 0 ? "var(--bad)" : "";
-  card.querySelector(".f-built").textContent = match.built.length;
+  card.querySelector(".f-built").textContent = world.buildings.size || match.built.length;
 
-  // The dashboard draws a map. The real game is one join away, and that is where the
-  // animations, the units and the waves actually are.
-  const watch = card.querySelector(".watch");
-  watch.classList.toggle("on", !!match.watchable && !!match.game_port);
+  const join = card.querySelector(".join");
+  join.classList.toggle("on", !!match.watchable && !!match.game_port);
   if (match.watchable && match.game_port) {
-    watch.innerHTML = `${t("watchInGame")} <b>127.0.0.1:${match.game_port}</b>`;
+    join.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" aria-hidden="true"><path d="M10 8l6 4-6 4z"/><circle cx="12" cy="12" r="9"/></svg>
+      ${t("joinInGame")} <b>127.0.0.1:${match.game_port}</b>`;
   }
 
   const items = card.querySelector(".items");
-  items.innerHTML = "";
+  items.textContent = "";
   for (const [name, amount] of Object.entries(match.items || {})) {
     const chip = document.createElement("span");
     chip.className = "item";
     chip.innerHTML = `${name} <b>${amount}</b>`;
     items.append(chip);
   }
-
-  loadTerrain(match.index, match.terrain_version).then(terrain =>
-    drawMap(card.querySelector("canvas"), match, terrain, 0));
 }
 
 // Detail -----------------------------------------------------------------------
+function setFollow(on) {
+  camera.follow = on;
+  document.getElementById("d-follow").setAttribute("aria-pressed", String(on));
+}
+
+function zoomBy(factor, anchor) {
+  const next = Math.max(CAMERA.min, Math.min(CAMERA.max, camera.span * factor));
+  if (anchor) {
+    // Zoom towards the pointer rather than the middle, so the thing being looked at
+    // stays under the cursor instead of sliding away from it.
+    const k = 1 - next / camera.span;
+    camera.x += (anchor.x - camera.x) * k;
+    camera.y += (anchor.y - camera.y) * k;
+  }
+  camera.span = next;
+}
+
 function openDetail(index) {
   detailIndex = index;
+  const match = matches.find(m => m.index === index);
+  const world = worldOf(index);
+  const agent = match ? pickAgent(world, match) : null;
+  camera.span = 70;
+  camera.follow = true;
+  camera.at = 0;
+  if (agent) { camera.x = agent.x; camera.y = agent.y; }
+  else if (match && match.core[0] >= 0) { camera.x = match.core[0]; camera.y = match.core[1]; }
+  else { camera.x = world.width / 2; camera.y = world.height / 2; }
+  setFollow(true);
   document.getElementById("detail").classList.add("open");
+  document.getElementById("d-close").focus();
 }
+
+// Camera controls -------------------------------------------------------------
+const detailCanvas = document.getElementById("d-canvas");
+document.getElementById("d-follow").onclick = () => setFollow(!camera.follow);
+document.getElementById("d-in").onclick = () => zoomBy(1 / 1.4, null);
+document.getElementById("d-out").onclick = () => zoomBy(1.4, null);
+
+let dragFrom = null;
+detailCanvas.addEventListener("pointerdown", e => {
+  dragFrom = { x: e.clientX, y: e.clientY, camX: camera.x, camY: camera.y };
+  camera.dragging = true;
+  detailCanvas.classList.add("dragging");
+  detailCanvas.setPointerCapture(e.pointerId);
+});
+detailCanvas.addEventListener("pointermove", e => {
+  if (!dragFrom) return;
+  // Taking the picture in hand is a statement that you want to look elsewhere, so it
+  // releases the follow rather than fighting it back every frame.
+  if (camera.follow) setFollow(false);
+  const perTile = detailCanvas.clientHeight / camera.span;
+  camera.x = dragFrom.camX - (e.clientX - dragFrom.x) / perTile;
+  camera.y = dragFrom.camY + (e.clientY - dragFrom.y) / perTile;
+});
+const endDrag = () => {
+  dragFrom = null;
+  camera.dragging = false;
+  detailCanvas.classList.remove("dragging");
+};
+detailCanvas.addEventListener("pointerup", endDrag);
+detailCanvas.addEventListener("pointercancel", endDrag);
+
+detailCanvas.addEventListener("wheel", e => {
+  e.preventDefault();
+  const rect = detailCanvas.getBoundingClientRect();
+  const perTile = rect.height / camera.span;
+  const anchor = {
+    x: camera.x + (e.clientX - rect.left - rect.width / 2) / perTile,
+    y: camera.y - (e.clientY - rect.top - rect.height / 2) / perTile,
+  };
+  zoomBy(e.deltaY > 0 ? 1.15 : 1 / 1.15, anchor);
+}, { passive: false });
+
+document.addEventListener("keydown", e => {
+  if (detailIndex === null) return;
+  const step = camera.span / 12;
+  const pan = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] }[e.key];
+  if (pan) {
+    e.preventDefault();
+    setFollow(false);
+    camera.x += pan[0];
+    camera.y += pan[1];
+  } else if (e.key === "+" || e.key === "=") { zoomBy(1 / 1.4, null); }
+  else if (e.key === "-") { zoomBy(1.4, null); }
+  else if (e.key === "f") { setFollow(!camera.follow); }
+});
 document.getElementById("d-close").onclick = () => {
   detailIndex = null;
   document.getElementById("detail").classList.remove("open");
 };
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape") document.getElementById("d-close").click();
+  if (e.key === "Escape" && detailIndex !== null) document.getElementById("d-close").click();
 });
 
 function updateDetail(match) {
+  const world = worldOf(match.index);
   document.getElementById("d-title").textContent = `${match.policy} #${match.index}`;
   document.getElementById("d-step").textContent = `${match.step}/${match.max_steps}`;
   document.getElementById("d-wave").textContent = match.wave;
   document.getElementById("d-reward").textContent = match.reward.toFixed(2);
-  document.getElementById("d-built").textContent = match.built.length;
+  document.getElementById("d-built").textContent = world.buildings.size || match.built.length;
+  document.getElementById("d-units").textContent = world.units.size;
   document.getElementById("d-action").textContent = match.action || "-";
   document.getElementById("d-items").textContent =
     Object.entries(match.items || {}).map(([k, v]) => `${k} ${v}`).join("  ") || "-";
-  loadTerrain(match.index, match.terrain_version).then(terrain =>
-    drawMap(document.getElementById("d-canvas"), match, terrain, 90));
+  const waveCount = document.getElementById("d-wavecount");
+  waveCount.textContent = world.enemies ? `${world.enemies} ${t("legendEnemy")}` : "";
 }
 
-// Curves -----------------------------------------------------------------------
+// Panels -----------------------------------------------------------------------
+function renderVersions(generations) {
+  const host = document.getElementById("s-versions");
+  const saved = generations.filter(g => g.checkpoint);
+  if (!saved.length) {
+    host.innerHTML = `<div class="empty">${t("noVersions")}</div>`;
+    return;
+  }
+  const rows = saved.slice(-8).reverse().map(g => `
+    <tr>
+      <td>${t("gen")} <b class="${g.best ? "best" : ""}">${g.update}</b>${g.best ? `<span class="tag-best">best</span>` : ""}</td>
+      <td>${g.episodes} ${t("episodesShort")}</td>
+      <td class="${g.mean_reward > 0 ? "best" : ""}">${g.mean_reward === null ? "-" : g.mean_reward.toFixed(2)}</td>
+    </tr>`).join("");
+  host.innerHTML = `<table class="gens">
+    <tr><th>${t("versions")}</th><th>${t("episodesShort")}</th><th>${t("mean")}</th></tr>${rows}</table>`;
+}
+
+function renderReplays(matches) {
+  const host = document.getElementById("s-replays");
+  const entries = [];
+  for (const match of matches) {
+    for (const replay of match.replays || []) entries.push({ ...replay, match: match.index });
+  }
+  if (!entries.length) {
+    host.innerHTML = `<div class="empty">${t("noReplays")}</div>`;
+    return;
+  }
+  entries.sort((a, b) => b.reward - a.reward);
+  host.innerHTML = entries.slice(0, 8).map(e => `
+    <a class="replay ${e.solved ? "solved" : ""}" target="_blank" rel="noopener"
+       href="index.html?replay=replay/${e.match}/${encodeURIComponent(e.file)}">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 9l5 3-5 3z"/></svg>
+      #${e.match} · ${t("episodesShort")} ${e.episode}
+      <span class="rw">${e.reward >= 0 ? "+" : ""}${e.reward.toFixed(2)}${e.solved ? " ✓" : ""}</span>
+    </a>`).join("");
+}
+
 function drawLearning(generations) {
   const canvas = document.getElementById("learning");
   const ctx = canvas.getContext("2d");
-  const ratio = window.devicePixelRatio || 1;
+  const ratio = Math.min(2, window.devicePixelRatio || 1);
   canvas.width = canvas.clientWidth * ratio;
   canvas.height = 150 * ratio;
   ctx.fillStyle = "#08080d";
@@ -425,9 +1198,9 @@ function drawLearning(generations) {
 
   const points = generations.filter(g => g.mean_reward !== null);
   if (points.length < 2) {
-    ctx.fillStyle = "#8a8797";
+    ctx.fillStyle = "#6c6a7d";
     ctx.font = `${12 * ratio}px ui-monospace, monospace`;
-    ctx.fillText(t("waiting"), 10 * ratio, 24 * ratio);
+    ctx.fillText(t("needGenerations"), 10 * ratio, 24 * ratio);
     return;
   }
 
@@ -435,23 +1208,23 @@ function drawLearning(generations) {
   const min = Math.min(...values), max = Math.max(...values);
   const span = (max - min) || 1;
   const stepX = canvas.width / (points.length - 1);
-  const yOf = v => canvas.height - ((v - min) / span) * (canvas.height - 20 * ratio) - 10 * ratio;
+  const yOf = v => canvas.height - ((v - min) / span) * (canvas.height - 22 * ratio) - 11 * ratio;
 
   if (min < 0 && max > 0) {
-    ctx.strokeStyle = "#2a2a38";
+    ctx.strokeStyle = "#2a2a3a";
     ctx.beginPath(); ctx.moveTo(0, yOf(0)); ctx.lineTo(canvas.width, yOf(0)); ctx.stroke();
   }
 
-  // Raw per generation faint, smoothed on top: the raw series is too noisy to read a
-  // trend from, and the smoothed one alone hides how noisy it is.
-  ctx.strokeStyle = "rgba(255,211,127,.25)";
+  // Raw faint, smoothed on top: the raw series is too noisy to read a trend from, and the
+  // smoothed one alone hides how noisy it really is.
+  ctx.strokeStyle = "rgba(255,207,107,.22)";
   ctx.lineWidth = ratio;
   ctx.beginPath();
   points.forEach((p, i) => i ? ctx.lineTo(i * stepX, yOf(p.mean_reward)) : ctx.moveTo(0, yOf(p.mean_reward)));
   ctx.stroke();
 
   const w = Math.max(2, Math.round(points.length / 12));
-  ctx.strokeStyle = "#ffd37f";
+  ctx.strokeStyle = "#ffcf6b";
   ctx.lineWidth = 2 * ratio;
   ctx.beginPath();
   points.forEach((p, i) => {
@@ -460,6 +1233,14 @@ function drawLearning(generations) {
     i ? ctx.lineTo(i * stepX, yOf(avg)) : ctx.moveTo(0, yOf(avg));
   });
   ctx.stroke();
+
+  points.forEach((p, i) => {
+    if (!p.best) return;
+    ctx.fillStyle = "#ffcf6b";
+    ctx.beginPath();
+    ctx.arc(i * stepX, yOf(p.mean_reward), 3 * ratio, 0, Math.PI * 2);
+    ctx.fill();
+  });
 
   const n = Math.min(5, values.length);
   const first = values.slice(0, n).reduce((a, b) => a + b, 0) / n;
@@ -472,12 +1253,16 @@ function drawLearning(generations) {
   document.getElementById("s-entropy").textContent = points[points.length - 1].entropy.toFixed(2);
 }
 
-// Poll -------------------------------------------------------------------------
-async function refresh() {
+// Loops ------------------------------------------------------------------------
+let matches = [];
+
+async function refreshState() {
   try {
     await loadAtlas();
     const state = await (await fetch("state", { cache: "no-store" })).json();
-    document.getElementById("s-live").textContent = t("live");
+    const live = document.getElementById("s-live");
+    live.className = "pill live";
+    live.lastElementChild.textContent = t("live");
 
     const totals = state.totals;
     document.getElementById("s-task").textContent = state.title;
@@ -488,35 +1273,80 @@ async function refresh() {
     document.getElementById("s-sps").textContent = totals.steps_per_second;
     document.getElementById("s-elapsed").textContent = Math.round(state.elapsed) + "s";
 
-    if (state.matches.length) {
+    matches = state.matches;
+    if (matches.length) {
       const empty = document.querySelector("#matches .empty");
       if (empty) empty.remove();
-      document.getElementById("s-objective").textContent = state.matches[0].objective || "-";
-      state.matches.forEach(updateCard);
+      document.getElementById("s-objective").textContent = matches[0].objective || "-";
+      for (const match of matches) {
+        updateCard(match);
+        loadTerrain(match.index, match.terrain_version);
+      }
       if (detailIndex !== null) {
-        const match = state.matches.find(m => m.index === detailIndex);
+        const match = matches.find(m => m.index === detailIndex);
         if (match) updateDetail(match);
       }
     }
 
     const board = document.getElementById("s-leaderboard");
-    board.innerHTML = "";
+    board.textContent = "";
     for (const row of state.leaderboard.slice(0, 8)) {
       const li = document.createElement("li");
-      li.innerHTML = `<b>${row.policy}</b> #${row.match} - ${row.best.toFixed(2)} / ${row.solved}/${row.episodes} ${t("solved")}`;
+      li.innerHTML = `<b>${row.policy}</b> #${row.match} — ${row.best.toFixed(2)} · ${row.solved}/${row.episodes} ${t("solved")}`;
       board.append(li);
     }
     if (!state.leaderboard.length) board.innerHTML = `<li class="empty">${t("noResults")}</li>`;
 
     drawLearning(state.generations || []);
+    renderVersions(state.generations || []);
+    renderReplays(matches);
   } catch {
-    document.getElementById("s-live").textContent = t("disconnected");
+    const live = document.getElementById("s-live");
+    live.className = "pill down";
+    live.lastElementChild.textContent = t("disconnected");
+  }
+}
+
+/** Poll the animation of whatever is on screen, and only that. */
+function refreshScenes() {
+  if (detailIndex !== null) { pollScene(detailIndex); return; }
+  for (const match of matches) if (match.alive) pollScene(match.index);
+}
+
+let lastCardDraw = 0;
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (!atlas && atlasIndex !== false) return;
+
+  if (detailIndex !== null) {
+    const match = matches.find(m => m.index === detailIndex);
+    const world = worldOf(detailIndex);
+    world.sweep(now);
+    if (match) {
+      followAgent(world, match, now);
+      drawMatch(detailCanvas, match, terrains.get(detailIndex), world, true, now);
+    }
+    return;
+  }
+
+  // Cards at thirty frames a second. Six canvases at sixty would spend more time drawing
+  // sightseeing than the training spends learning.
+  if (now - lastCardDraw < 33) return;
+  lastCardDraw = now;
+  for (const match of matches) {
+    const card = cards.get(match.index);
+    if (!card) continue;
+    const world = worldOf(match.index);
+    world.sweep(now);
+    drawMatch(card.querySelector("canvas"), match, terrains.get(match.index), world, 0, now);
   }
 }
 
 applyLanguage();
-refresh();
-setInterval(refresh, 600);
+refreshState();
+setInterval(refreshState, 700);
+setInterval(refreshScenes, 180);
+requestAnimationFrame(frame);
 </script>
 </body>
 </html>

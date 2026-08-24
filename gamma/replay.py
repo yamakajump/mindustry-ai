@@ -155,21 +155,35 @@ class ReplayRecorder:
         # became occupied; only the action says by what, and a viewer needs the block
         # identity to pick a sprite. It also costs less than the deltas it replaces.
         if action is not None and outcome is not None and outcome.get("applied"):
-            kind = int(action[0])
-            if kind == 1:
+            # By name, never by index. The embodied action space puts `move` and `build`
+            # where the direct one puts `place` and `break`, so a hardcoded index records
+            # a move as a construction and the viewer draws a block that was never built.
+            kind = self.env.action_types[int(action[0])]
+            if kind in ("place", "build"):
                 frame["act"] = {
                     "t": "place",
                     "b": self.env.blocks[int(action[1])],
                     "x": int(action[2]), "y": int(action[3]), "r": int(action[4]),
                 }
-            elif kind == 2:
+            elif kind == "break":
                 frame["act"] = {"t": "break", "x": int(action[2]), "y": int(action[3])}
+            elif kind in ("move", "mine"):
+                frame["act"] = {"t": kind, "x": int(action[2]), "y": int(action[3])}
         return frame
 
-    def close(self) -> None:
+    def finish(self) -> None:
+        """Close the current recording without closing the environment.
+
+        A run that records episode after episode needs the file sealed before it can be
+        renamed by its result, while the environment carries straight on into the next
+        episode. Closing both together would end the run at the first episode.
+        """
         if self._file is not None:
             self._file.close()
             self._file = None
+
+    def close(self) -> None:
+        self.finish()
         self.env.close()
 
 
