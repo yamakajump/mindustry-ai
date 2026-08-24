@@ -207,6 +207,24 @@ class MindustryEnv(gym.Env):
             [len(self.action_types), len(self.blocks), width, height, 4]
         )
 
+    def _check_shape(self, obs: dict[str, Any]) -> None:
+        """Refuse an episode on a map that is not the size the spaces were built for.
+
+        The action space carries the map dimensions, so a different size makes every
+        position the agent picks meaningless, and the failure surfaces somewhere else
+        entirely: the first time this happened it came out of the replay recorder as a
+        broadcast error between two arrays, which says nothing about a map having changed
+        underneath the run.
+        """
+        expected = self._observation_space["spatial"].shape[1:]
+        actual = obs["spatial"].shape[1:]
+        if actual != expected:
+            raise RuntimeError(
+                f"the map changed size between episodes: expected {expected[1]}x{expected[0]}, "
+                f"loaded {actual[1]}x{actual[0]}. Task {self.task.name!r} asked for "
+                f"{'sector ' + self.task.sector if self.task.sector else 'map ' + self.task.map_name!r}."
+            )
+
     @property
     def action_types(self) -> tuple[str, ...]:
         return EMBODIED_ACTION_TYPES if self.embodied else DIRECT_ACTION_TYPES
@@ -335,6 +353,8 @@ class MindustryEnv(gym.Env):
         raw = self._load(bridge)
         if self._observation_space is None:
             self._build_spaces(raw)
+        else:
+            self._check_shape(raw)
 
         self._steps = 0
         self._last_obs = raw

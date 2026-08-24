@@ -130,6 +130,12 @@ class ReplayRecorder:
         added: list[list[int]] = []
         removed: list[list[int]] = []
 
+        if self._previous is not None and self._previous.shape != current.shape:
+            # The map changed size under the recording, which the environment refuses on
+            # the next reset. Nothing here can salvage the file, but the diff is not the
+            # place to report it: a broadcast error from a delta hides the actual fault.
+            self._previous = None
+
         if self._previous is not None:
             changed = np.argwhere(current != self._previous)
             for y, x in changed:
