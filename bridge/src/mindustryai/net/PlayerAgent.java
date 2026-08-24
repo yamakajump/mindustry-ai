@@ -169,9 +169,28 @@ public class PlayerAgent extends AIController {
 
         approach(unit, new Vec2(core.x, core.y));
 
-        // The engine hands items over on its own once the unit is close enough, so all
-        // this has to do is get there and then stop asking.
+        // The engine only hands items over by itself when the unit is full and actively
+        // mining. An agent that decides to bank a half load has to ask, the same way a
+        // player pressing the deposit key does.
         if (unit.within(core, Vars.mineTransferRange)) {
+            // Mining keeps refilling the stack while we try to empty it, so mining is
+            // stopped for the handover. Otherwise the unit hovers at a few items forever:
+            // it deposits and immediately re-mines, and the core never sees a full stack.
+            unit.mineTile = null;
+            mining = null;
+
+            int accepted = core.acceptStack(unit.item(), unit.stack.amount, unit);
+            if (accepted <= 0) {
+                Log.warn("[mindustry-ai] core refused @ x@", unit.item(), unit.stack.amount);
+            }
+            if (accepted > 0) {
+                // handleStack applies the transfer; Call.transferItemTo only animates it
+                // for connected clients. Relying on the animation alone deposited nothing:
+                // the unit emptied itself 66 times and the core never gained an item.
+                core.handleStack(unit.item(), accepted, unit);
+                mindustry.gen.Call.transferItemTo(unit, unit.item(), accepted, unit.x, unit.y, core);
+                unit.clearItem();
+            }
             unloading = false;
         }
     }
