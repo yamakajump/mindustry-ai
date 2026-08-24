@@ -25,6 +25,14 @@ class Task:
     map_name: str
     mode: str = "survival"
 
+    #: Campaign sector to load instead of a custom map. Ground Zero is the first sector
+    #: of the Serpulo campaign, and the game itself defines what winning means there:
+    #: survive to wave 10. That beats any threshold invented for a custom map.
+    sector: str | None = None
+
+    #: Items placed in the core on load. A sector loaded directly comes up empty.
+    loadout: dict[str, int] | None = None
+
     #: Game ticks the world advances per agent decision.
     ticks_per_step: int = 30
 
@@ -132,3 +140,23 @@ def get(name: str) -> Task:
     if name not in CURRICULUM:
         raise KeyError(f"unknown task {name!r}, known: {sorted(CURRICULUM)}")
     return CURRICULUM[name]
+
+
+GROUND_ZERO = Task(
+    name="GZ_capture",
+    description="Capture Ground Zero: survive to wave 10, as the campaign defines it.",
+    map_name="Ground Zero",
+    sector="groundZero",
+    # The campaign hands the player a launch loadout; a sector loaded directly does not
+    # get one, so it is stated here rather than left to a chain of engine conditions.
+    loadout={"copper": 300, "lead": 300},
+    ticks_per_step=30,
+    max_steps=4000,
+    succeeded=lambda obs: int(obs.get("wave", 0)) > 10,
+    reward=lambda before, after: float(
+        int(after.get("wave", 0)) - int(before.get("wave", 0))
+    ),
+    success_bonus=50.0,
+)
+
+CURRICULUM[GROUND_ZERO.name] = GROUND_ZERO

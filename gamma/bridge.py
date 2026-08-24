@@ -208,6 +208,22 @@ class Bridge:
         """Remove a block, then let the world run."""
         return self.step(repeat=repeat, action={"type": "break", "x": x, "y": y})
 
+    def map(self) -> dict[str, Any]:
+        """Fetch the full typed map: floors, overlays, buildings, rotations, palette.
+
+        Large and slow-changing, so it is a separate command rather than part of every
+        observation. A viewer needs exact block identities to pick sprites; a policy does
+        not, which is why the observation tensor carries categories instead.
+        """
+        return self.request({"cmd": "map"})
+
+    def sector(self, name: str = "groundZero", loadout: dict[str, int] | None = None):
+        """Load a campaign sector, such as Ground Zero, the first of the Serpulo campaign."""
+        message: dict[str, Any] = {"cmd": "sector", "name": name}
+        if loadout is not None:
+            message["loadout"] = loadout
+        return self.request(message)
+
     def affordable_blocks(self) -> list[str]:
         """Blocks the core can currently pay for. The mask for the block head."""
         return self.request({"cmd": "blocks"})["affordable"]

@@ -146,9 +146,15 @@ class MindustryEnv(gym.Env):
         """
         if self._action_space is None:
             bridge = self._ensure_started()
-            raw = bridge.reset(self.task.map_name, self.task.mode)
+            raw = self._load(bridge)
             self._build_spaces(raw)
             self._last_obs = raw
+
+    def _load(self, bridge: Bridge) -> dict[str, Any]:
+        """Start a match, from a campaign sector or a custom map."""
+        if self.task.sector is not None:
+            return bridge.sector(self.task.sector, self.task.loadout)
+        return bridge.reset(self.task.map_name, self.task.mode)
 
     def _build_spaces(self, obs: dict[str, Any]) -> None:
         spatial = obs["spatial"]
@@ -242,7 +248,7 @@ class MindustryEnv(gym.Env):
         super().reset(seed=seed)
         bridge = self._ensure_started()
 
-        raw = bridge.reset(self.task.map_name, self.task.mode)
+        raw = self._load(bridge)
         if self._observation_space is None:
             self._build_spaces(raw)
 

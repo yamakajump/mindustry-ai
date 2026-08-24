@@ -73,15 +73,34 @@ choice, including the alternatives that were rejected, is in
 
 ## Watch it play
 
-Replays are recorded as event logs and played back in a static page, so an agent's whole
-match can be watched in a browser with nothing installed.
+Two ways, and they are not equivalent.
 
-**[Watch Alpha build a copper chain](https://yamakajump.github.io/mindustry-ai/?replay=replays/alpha-t1.jsonl.gz)**
- | [Watch a random policy go bankrupt](https://yamakajump.github.io/mindustry-ai/?replay=replays/random-t1.jsonl.gz)
+### In the real game, with everything
 
-A full 450 step episode is about 8 KB, because only what changed is stored. The same
-format will carry live training over a WebSocket: the viewer cannot tell the difference
-between a file and a socket, so live viewing costs almost nothing once replay works. See
+```bash
+python tools/watch.py replays/showcase/alpha-t1.jsonl.gz
+```
+
+Then open Mindustry, **Play → Join Game → 127.0.0.1:6567**, and fly around while the
+agent builds. Conveyor animations, items sliding along them, block connections, lighting,
+wave effects: all of it, because the game itself is doing the rendering.
+
+No client mod is needed. The training server already speaks Mindustry's own network
+protocol, so a stock client can simply join it. This also works live during training, not
+only for replays.
+
+### In a browser, for sharing
+
+**[Alpha building a copper chain](https://yamakajump.github.io/mindustry-ai/?replay=replays/alpha-t1.jsonl.gz)**
+ | [a random policy going bankrupt](https://yamakajump.github.io/mindustry-ai/?replay=replays/random-t1.jsonl.gz)
+
+Drawn with the game's own sprites, pan and zoom, no install. Being honest about it: this
+is a map, not the game. There are no animations, conveyors do not connect visually, and
+there is no lighting. It exists so a replay can be shared as a link, which the real client
+cannot do.
+
+A full 450 step episode is about 16 KB, because only the typed map and the actions taken
+are stored, not the state. The same format will carry live training over a WebSocket. See
 [decision 3](docs/decisions/0003-one-replay-format.md).
 
 ## Where it stands
