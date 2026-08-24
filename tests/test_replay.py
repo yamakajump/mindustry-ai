@@ -24,8 +24,8 @@ def read(path: Path) -> tuple[dict, list[dict]]:
     return records[0], records[1:]
 
 
-def plane(encoded: str) -> np.ndarray:
-    return np.frombuffer(zlib.decompress(base64.b64decode(encoded)), dtype=np.uint8)
+def plane(encoded: str, dtype=np.uint8) -> np.ndarray:
+    return np.frombuffer(zlib.decompress(base64.b64decode(encoded)), dtype=dtype)
 
 
 @pytest.fixture(scope="module")
@@ -43,13 +43,31 @@ def recorded(env, tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 def test_header_describes_the_map(recorded: Path) -> None:
+    """The header carries the typed map, which is what lets a viewer pick real sprites."""
     header, _ = read(recorded)
     assert header["type"] == "header"
     assert header["format"] == REPLAY_FORMAT
     assert header["width"] > 0 and header["height"] > 0
-    assert plane(header["solid"]).size == header["width"] * header["height"]
-    assert plane(header["ores"]).size == header["width"] * header["height"]
-    assert "copper" in header["ore_names"]
+
+    tiles = header["width"] * header["height"]
+    assert plane(header["floor"], np.uint16).size == tiles
+    assert plane(header["overlay"], np.uint16).size == tiles
+    assert plane(header["block"], np.uint16).size == tiles
+    assert plane(header["rotation"]).size == tiles
+
+    names = {entry["name"] for entry in header["palette"].values()}
+    assert "ore-copper" in names, "the palette should name the map's ores"
+    assert header["blocks"], "the blocks the agent can place must be listed for sprites"
+
+
+def test_actions_are_recorded_with_their_block(recorded: Path) -> None:
+    """Tile deltas say a tile filled up; only the action says with what."""
+    _, records = read(recorded)
+    acts = [r["act"] for r in records if r.get("type") == "frame" and "act" in r]
+    assert acts, "no actions recorded"
+    placed = [a for a in acts if a["t"] == "place"]
+    assert placed, "nothing was built"
+    assert all(isinstance(a["b"], str) for a in placed), "block identity missing"
 
 
 def test_frames_carry_the_timeline(recorded: Path) -> None:
@@ -74,23 +92,24 @@ def test_replay_stays_small(recorded: Path) -> None:
     assert recorded.stat().st_size < 200_000, "a 40 step replay should be a few KB"
 
 
-def test_replaying_deltas_reconstructs_the_final_state(recorded: Path) -> None:
-    """The viewer rebuilds each frame by applying deltas in order, so that has to work."""
+def test_replaying_actions_reconstructs_the_final_state(recorded: Path) -> None:
+    """The viewer rebuilds each frame by applying recorded actions in order."""
     header, records = read(recorded)
     frames = [r for r in records if r["type"] == "frame"]
 
-    present: set[tuple[int, int]] = set()
+    present: dict[tuple[int, int], str] = {}
     for frame in frames:
-        for x, y in frame.get("removed", []):
-            present.discard((x, y))
-        for x, y in frame.get("added", []):
-            present.add((x, y))
+        act = frame.get("act")
+        if not act:
+            continue
+        if act["t"] == "place":
+            present[(act["x"], act["y"])] = act["b"]
+        else:
+            present.pop((act["x"], act["y"]), None)
 
     assert present, "no blocks survived to the end"
-    solid = plane(header["solid"]).reshape(header["height"], header["width"])
     for x, y in present:
         assert 0 <= x < header["width"] and 0 <= y < header["height"], "block outside the map"
-        assert solid[y, x] == 0, "a block was recorded inside a wall"
 
 
 def test_episode_end_is_recorded(recorded: Path) -> None:

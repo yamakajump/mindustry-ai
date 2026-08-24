@@ -35,6 +35,7 @@ public class StepLoop implements ApplicationListener {
     private final Clock clock;
     private final ObservationEncoder encoder = new ObservationEncoder();
     private final ActionExecutor actions = new ActionExecutor();
+    private final MapExporter exporter = new MapExporter();
 
     /** Outcome of the action carried by the last step, reported in its observation. */
     private ActionExecutor.Result lastAction;
@@ -137,6 +138,8 @@ public class StepLoop implements ApplicationListener {
                 case "step" -> handleStep(message);
                 case "act" -> handleAct(message);
                 case "blocks" -> handleBlocks();
+                case "map" -> handleMap();
+                case "sector" -> handleSector(message);
                 case "observe" -> respond(observation(false));
                 case "close" -> handleClose();
                 default -> server.reply(error("unknown command: " + command.asString()));
@@ -230,6 +233,110 @@ public class StepLoop implements ApplicationListener {
         reply.put("ok", true);
         reply.put("affordable", actions.affordableBlocks());
         server.reply(reply.toString());
+    }
+
+    /**
+     * Send the full typed map: floors, overlays, buildings, rotations, plus a palette.
+     *
+     * <p>This is what lets a viewer draw the game with its own sprites rather than
+     * coloured squares. It is a separate command because it is large and rarely changes:
+     * once per map load, not once per step.
+     */
+    private void handleMap() {
+        if (!Vars.state.isGame()) {
+            server.reply(error("no map loaded, send reset first"));
+            return;
+        }
+
+        Jval reply = Jval.newObject();
+        reply.put("ok", true);
+        reply.put("width", Vars.world.width());
+        reply.put("height", Vars.world.height());
+        reply.put("palette", exporter.palette());
+        reply.put("layout", exporter.layout());
+
+        byte[] planes = exporter.planes();
+        Jval spec = Jval.newObject();
+        spec.put("bytes", planes.length);
+        spec.put("dtype", "mixed");
+        Jval shape = Jval.newArray();
+        shape.asArray().add(Jval.valueOf(planes.length));
+        spec.put("shape", shape);
+        reply.put("tensor", spec);
+
+        server.reply(reply.toString(), planes);
+    }
+
+    /**
+     * Load a campaign sector rather than a custom map.
+     *
+     * <p>Ground Zero is the first sector of the Serpulo campaign, and capturing it is a
+     * real objective the game itself defines: survive to wave 10. That makes a far more
+     * meaningful benchmark than a number invented for a custom map.
+     */
+    private void handleSector(Jval message) {
+        String name = message.get("name") == null ? "groundZero" : message.get("name").asString();
+
+        mindustry.type.SectorPreset preset = Vars.content.getByName(
+            mindustry.ctype.ContentType.sector, name);
+        if (preset == null) {
+            server.reply(error("no such sector: " + name));
+            return;
+        }
+
+        Vars.world.loadSector(preset.sector);
+        Vars.state.rules.sector = preset.sector;
+        Vars.logic.play();
+        if (!Vars.net.server()) {
+            Vars.netServer.openServer();
+        }
+
+        applyLoadout(message.get("loadout"));
+
+        encoder.rebuild();
+        freeze();
+        respond(observation(false));
+    }
+
+    /**
+     * Stock the core so the agent can actually build.
+     *
+     * <p>A campaign sector normally receives its starting items from the loadout the
+     * player launched with, through a chain of conditions in {@code Logic.play} that does
+     * not fire for a sector loaded directly. Measured on Ground Zero, the core came up
+     * empty, which leaves an agent unable to place a single block. Filling it here is
+     * explicit and deterministic rather than dependent on that chain.
+     *
+     * @param requested optional map of item name to amount, defaulting to the rules loadout
+     */
+    private void applyLoadout(Jval requested) {
+        var core = Vars.state.rules.defaultTeam.core();
+        if (core == null) {
+            return;
+        }
+
+        if (requested != null) {
+            for (var entry : requested.asObject()) {
+                var item = Vars.content.item(entry.key);
+                if (item != null) {
+                    core.items.set(item, Math.min(entry.value.asInt(), core.storageCapacity));
+                }
+            }
+            return;
+        }
+
+        boolean empty = true;
+        for (var item : Vars.content.items()) {
+            if (core.items.get(item) > 0) {
+                empty = false;
+                break;
+            }
+        }
+        if (empty) {
+            for (var stack : Vars.state.rules.loadout) {
+                core.items.add(stack.item, Math.min(stack.amount, core.storageCapacity));
+            }
+        }
     }
 
     /** Decode and apply one action. Never throws: an illegal action is data, not a fault. */

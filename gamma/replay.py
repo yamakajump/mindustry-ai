@@ -24,9 +24,13 @@ import numpy as np
 REPLAY_FORMAT = 1
 
 
+def _encode_bytes(data: bytes) -> str:
+    """Compress raw bytes to base64, decodable in a browser with DecompressionStream."""
+    return base64.b64encode(zlib.compress(bytes(data), 9)).decode("ascii")
+
+
 def _encode_plane(plane: np.ndarray) -> str:
-    """Compress a uint8 plane to base64, decodable in a browser."""
-    return base64.b64encode(zlib.compress(np.ascontiguousarray(plane, dtype=np.uint8).tobytes(), 9)).decode("ascii")
+    return _encode_bytes(np.ascontiguousarray(plane, dtype=np.uint8).tobytes())
 
 
 class ReplayRecorder:
@@ -71,14 +75,12 @@ class ReplayRecorder:
         self._file = gzip.open(self.path, "wb")
         self._step = 0
 
-        channels = self.env._bridge.channels
-        ore_names = [c for c in channels if c.startswith("ore_")]
-
-        # Ores collapse into one indexed plane: they never overlap, and one plane per ore
-        # would multiply the header size for no gain in what a viewer can show.
-        ores = np.zeros(spatial.shape[1:], dtype=np.uint8)
-        for index, name in enumerate(ore_names, start=1):
-            ores[self._channel(spatial, name) > 0] = index
+        # The typed map is what lets a viewer draw the game with its own sprites. It is
+        # fetched once per episode: 458 KB raw for a 256x256 map, a few dozen KB once
+        # compressed, against 413 MB if the observation tensor were stored per step.
+        typed = self.env._bridge.map()
+        planes = typed["spatial"]
+        tiles = typed["width"] * typed["height"]
 
         self._write({
             "type": "header",
@@ -87,12 +89,16 @@ class ReplayRecorder:
             "description": self.env.task.description,
             "map": self.env.task.map_name,
             "note": self.note,
-            "width": int(spatial.shape[2]),
-            "height": int(spatial.shape[1]),
+            "width": typed["width"],
+            "height": typed["height"],
             "core": [int(raw.get("core_x", -1)), int(raw.get("core_y", -1))],
-            "ore_names": [n.removeprefix("ore_") for n in ore_names],
-            "solid": _encode_plane(self._channel(spatial, "solid")),
-            "ores": _encode_plane(ores),
+            "palette": typed["palette"],
+            "blocks": list(self.env.blocks),
+            # Each plane base64 of zlib, decodable in a browser with DecompressionStream.
+            "floor": _encode_bytes(planes[0:tiles * 2]),
+            "overlay": _encode_bytes(planes[tiles * 2:tiles * 4]),
+            "block": _encode_bytes(planes[tiles * 4:tiles * 6]),
+            "rotation": _encode_bytes(planes[tiles * 6:tiles * 7]),
         })
 
         self._previous = self._channel(spatial, "block_ally").copy()
@@ -103,7 +109,7 @@ class ReplayRecorder:
         observation, reward, terminated, truncated, info = self.env.step(action)
         self._step += 1
         if self._file is not None:
-            self._write(self._frame(info["raw"], reward, info.get("action")))
+            self._write(self._frame(info["raw"], reward, info.get("action"), action))
             if terminated or truncated:
                 self._write({
                     "type": "end",
@@ -113,7 +119,13 @@ class ReplayRecorder:
                 })
         return observation, reward, terminated, truncated, info
 
-    def _frame(self, raw: dict[str, Any], reward: float, action: dict | None = None) -> dict:
+    def _frame(
+        self,
+        raw: dict[str, Any],
+        reward: float,
+        outcome: dict | None = None,
+        action: Any = None,
+    ) -> dict:
         current = self._channel(raw["spatial"], "block_ally")
         added: list[list[int]] = []
         removed: list[list[int]] = []
@@ -136,8 +148,22 @@ class ReplayRecorder:
             frame["added"] = added
         if removed:
             frame["removed"] = removed
-        if action is not None and not action.get("applied", True):
+        if outcome is not None and not outcome.get("applied", True):
             frame["refused"] = 1
+
+        # The action itself is recorded, not just which tiles changed. Deltas say a tile
+        # became occupied; only the action says by what, and a viewer needs the block
+        # identity to pick a sprite. It also costs less than the deltas it replaces.
+        if action is not None and outcome is not None and outcome.get("applied"):
+            kind = int(action[0])
+            if kind == 1:
+                frame["act"] = {
+                    "t": "place",
+                    "b": self.env.blocks[int(action[1])],
+                    "x": int(action[2]), "y": int(action[3]), "r": int(action[4]),
+                }
+            elif kind == 2:
+                frame["act"] = {"t": "break", "x": int(action[2]), "y": int(action[3])}
         return frame
 
     def close(self) -> None:
