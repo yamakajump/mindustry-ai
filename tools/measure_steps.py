@@ -57,7 +57,7 @@ def main() -> None:
     with ServerProcess(
         server_dir, jvm_args=[f"-Dmindustryai.port={BRIDGE_PORT}"], port=GAME_PORT
     ) as server:
-        server.wait_for(rf"listening on 127\.0\.0\.1:{BRIDGE_PORT}", timeout=60)
+        server.wait_for_bridge(BRIDGE_PORT, timeout=60)
         server.command("bridge-speed max", r"speed set")
 
         with Bridge(port=BRIDGE_PORT) as bridge:

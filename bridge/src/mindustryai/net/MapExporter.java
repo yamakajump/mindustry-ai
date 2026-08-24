@@ -51,7 +51,13 @@ public class MapExporter {
             buffer.putShort((short) Vars.world.tiles.geti(i).overlayID());
         }
         for (int i = 0; i < tiles; i++) {
-            buffer.putShort((short) Vars.world.tiles.geti(i).blockID());
+            Tile tile = Vars.world.tiles.geti(i);
+            // A multi-tile building fills every tile it covers with its own id. A viewer
+            // reading the plane tile by tile then draws a three-by-three core nine times,
+            // each one offset by a tile, which stacks into a pile of frames. Only the
+            // origin carries the id; the rest of the footprint is left empty.
+            boolean origin = tile.build == null || tile.build.tile == tile;
+            buffer.putShort((short) (origin ? tile.blockID() : 0));
         }
         for (int i = 0; i < tiles; i++) {
             Tile tile = Vars.world.tiles.geti(i);
@@ -89,8 +95,21 @@ public class MapExporter {
             entry.put("size", block.size);
             entry.put("solid", block.solid);
             entry.put("rotate", block.rotate);
-            entry.put("variants", block instanceof mindustry.world.blocks.environment.Floor floor
-                ? floor.variants : 0);
+            if (block instanceof mindustry.world.blocks.environment.Floor floor) {
+                entry.put("variants", floor.variants);
+                // Which floor wins where two meet, so a viewer blends them in the same
+                // direction the engine does. Comparing raw block ids gets it backwards
+                // wherever the ids do not happen to follow the blend order.
+                entry.put("blend", floor.blendGroup.id);
+                entry.put("liquid", floor.isLiquid);
+            } else {
+                entry.put("variants", 0);
+            }
+            // What the renderer needs to reproduce two passes it cannot infer from the
+            // sprite: which tiles cast the soft shadow the whole map sits under, and
+            // which are deep enough inside a rock mass to go black.
+            entry.put("shadow", block.hasShadow && block != mindustry.content.Blocks.air);
+            entry.put("dark", block.solid && !block.synthetic() && block.fillsTile);
             palette.put(String.valueOf(block.id), entry);
         }
         return palette;

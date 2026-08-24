@@ -187,6 +187,11 @@ public class PlayerAgent extends AIController {
             if (accepted > 0) {
                 core.handleStack(carried, accepted, unit);
                 unit.clearItem();
+                // The engine plays an item flying to the core here. A headless server
+                // draws nothing, so the fact is recorded instead and the viewer animates
+                // it, rather than a load of ore vanishing with no explanation.
+                lastDeposit = new Deposit(unit.x / Vars.tilesize, unit.y / Vars.tilesize,
+                    core.x / Vars.tilesize, core.y / Vars.tilesize, carried.id, accepted);
             }
 
             Log.info("[mindustry-ai] deposit item=@ amount=@ accepted=@ core=@->@ team=@/@",
@@ -195,6 +200,18 @@ public class PlayerAgent extends AIController {
                 unit.team(), core.team);
             unloading = false;
         }
+    }
+
+    /** An item handover the viewer has not been told about yet. */
+    public record Deposit(float x, float y, float toX, float toY, int item, int amount) {}
+
+    private Deposit lastDeposit;
+
+    /** Hand over the last deposit, once. Null when nothing has been banked since. */
+    public Deposit takeDeposit() {
+        Deposit deposit = lastDeposit;
+        lastDeposit = null;
+        return deposit;
     }
 
     private void approach(Unit unit, Vec2 target) {

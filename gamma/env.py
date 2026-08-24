@@ -12,6 +12,7 @@ so any algorithm can use it without the environment silently rewriting what was 
 
 from __future__ import annotations
 
+import random
 from typing import Any
 
 import gymnasium as gym
@@ -19,12 +20,17 @@ import numpy as np
 from gymnasium import spaces
 
 from gamma.bridge import Bridge
+from gamma.adapt import route, split
+from gamma.sectors import SectorPool, build_pool
 from gamma.server import ServerProcess, install_plugin
 from gamma.server_setup import setup_server
 from gamma.tasks import Task
 
 #: Action types when the agent has no body: it edits the world directly.
 DIRECT_ACTION_TYPES = ("noop", "place", "break")
+
+#: Added on top of either space when the environment is given a design library.
+STAMP = "stamp"
 
 #: Action types when the agent inhabits a unit, which is what a player can do.
 #: Building is queued rather than applied, and only completes once the unit is in range.
@@ -89,9 +95,37 @@ class MindustryEnv(gym.Env):
         jar: str | None = None,
         speed: str = "max",
         embodied: bool = False,
+        evaluating: bool = False,
+        seed: int | None = None,
+        designs: tuple = (),
     ) -> None:
         super().__init__()
         self.task = task
+        #: Structures the search discovered, offered to the policy as single actions.
+        #:
+        #: A conveyor line from a drill to the core pays nothing until it is complete, and
+        #: a policy choosing tiles one at a time never completes one: measured over 177
+        #: archived episodes, 5,719 conveyors placed and one line that ever met end to end.
+        #: Handed a structure as one action, the policy stops spelling and starts deciding
+        #: which patch, how many, and when, which is the part worth learning.
+        #:
+        #: Nothing here is a human blueprint. Every design comes out of the forge, scored
+        #: on what it delivered in a real game.
+        self.designs = tuple(designs)
+        # Designs share the block dimension of the action space rather than getting one of
+        # their own. Widening the space without widening the mask would have been worse
+        # than useless: the mask is what sets the size of the network's head, so the two
+        # would have disagreed and the disagreement would have surfaced as a shape error
+        # somewhere far from here.
+        if len(self.designs) > len(blocks):
+            raise ValueError(
+                f"{len(self.designs)} designs will not fit in a block dimension of "
+                f"{len(blocks)}: they share it"
+            )
+        # Drawing from the held-out half of the sector pool. Set only by the evaluator:
+        # a training run that touched these would make its own score meaningless.
+        self.evaluating = evaluating
+        self.sector_index: int | None = None
         self.blocks = blocks
         # An embodied agent plays as a player: it must travel to what it builds and mine
         # by hand. Slower to train, and the only setting that matches the real game.
@@ -106,6 +140,11 @@ class MindustryEnv(gym.Env):
 
         self._server: ServerProcess | None = None
         self._bridge: Bridge | None = None
+        self._pool: SectorPool | None = None
+        # Seeded per environment, so six of them running in parallel do not all draw the
+        # same sector on the same episode and turn a pool of two hundred into a pool of
+        # one.
+        self._rng = random.Random(seed if seed is not None else bridge_port)
         self._steps = 0
         self._last_obs: dict[str, Any] = {}
 
@@ -128,7 +167,7 @@ class MindustryEnv(gym.Env):
             port=self.game_port,
         )
         self._server.__enter__()
-        self._server.wait_for(rf"listening on 127\.0\.0\.1:{self.bridge_port}", timeout=90)
+        self._server.wait_for_bridge(self.bridge_port, timeout=90)
         self._server.command(f"bridge-speed {self.speed}", r"speed set")
 
         # Generous on purpose: a step on a developed base, on a machine sharing eight
@@ -178,15 +217,52 @@ class MindustryEnv(gym.Env):
             self._build_spaces(raw)
             self._last_obs = raw
 
+    def set_speed(self, speed: str) -> None:
+        """Change the simulation speed of a running server.
+
+        Uncapped speed means the engine's frame budget is zero, so its loop never sleeps.
+        That is what makes a step fast, and it also means a server with nothing to do
+        spins a core doing nothing at all. Twenty-four of them held the machine at 99%
+        through a pause that was supposed to free it. Dropping to realtime hands the
+        cores back; the pause raises it again on the way out.
+
+        Safe to call from another thread only while the owning one is not stepping: the
+        console channel is separate from the bridge socket, but neither is reentrant.
+        """
+        self.speed = speed
+        if self._server is not None:
+            self._server.command(f"bridge-speed {speed}", r"speed set", timeout=15.0)
+
     def _load(self, bridge: Bridge) -> dict[str, Any]:
-        """Start a match, from a campaign sector or a custom map."""
-        if self.task.sector is not None:
-            raw = bridge.sector(self.task.sector, self.task.loadout)
+        """Start a match: a generated sector, a named preset, or a custom map."""
+        if self.task.procedural:
+            raw = bridge.sector(index=self._next_sector(bridge), loadout=self.task.loadout,
+                                seed=self.task.world_seed)
+        elif self.task.sector is not None:
+            raw = bridge.sector(self.task.sector, self.task.loadout,
+                                seed=self.task.world_seed)
         else:
-            raw = bridge.reset(self.task.map_name, self.task.mode)
+            raw = bridge.reset(self.task.map_name, self.task.mode,
+                               seed=self.task.world_seed)
         if self.embodied:
             raw = bridge.embody()
         return raw
+
+    def _next_sector(self, bridge: Bridge) -> int:
+        """The world for this episode, drawn from the pool the task asked for.
+
+        The listing is fetched once per environment: it describes the planet, which does
+        not change, and asking for it on every episode would cost a round trip for an
+        answer that is already known.
+        """
+        if self._pool is None:
+            self._pool = build_pool(
+                bridge.sectors(),
+                threat_limit=self.task.threat_limit,
+                worlds=self.task.worlds,
+            )
+        self.sector_index = self._pool.pick(self._rng, evaluating=self.evaluating)
+        return self.sector_index
 
     def _build_spaces(self, obs: dict[str, Any]) -> None:
         spatial = obs["spatial"]
@@ -207,9 +283,23 @@ class MindustryEnv(gym.Env):
             [len(self.action_types), len(self.blocks), width, height, 4]
         )
 
+    def _resize(self, obs: dict[str, Any]) -> None:
+        """Follow the map when it changes size between episodes.
+
+        Generated sectors are not all the same size, so this is expected rather than
+        exceptional. It stays worth noticing because the spaces carry the dimensions: a
+        caller reading `action_space` and caching it would then be addressing a map that
+        no longer exists. Wrapped in a local window, which is how the policy sees the
+        world, none of this reaches the network.
+        """
+        expected = self._observation_space["spatial"].shape[1:]
+        if obs["spatial"].shape[1:] != expected:
+            self._build_spaces(obs)
+
     @property
     def action_types(self) -> tuple[str, ...]:
-        return EMBODIED_ACTION_TYPES if self.embodied else DIRECT_ACTION_TYPES
+        base = EMBODIED_ACTION_TYPES if self.embodied else DIRECT_ACTION_TYPES
+        return base + (STAMP,) if self.designs else base
 
     # Conversion ------------------------------------------------------------------
 
@@ -232,11 +322,44 @@ class MindustryEnv(gym.Env):
             "global": np.asarray(values, dtype=np.float32),
         }
 
+    def _stamp(self, action: np.ndarray) -> None:
+        """Lay a whole structure, one bridge action per block, before the world ticks.
+
+        The policy chooses the design and where to put it. Everything after that is
+        geometry: the drills go down first, because one needs two clear tiles by two and a
+        conveyor laid on a tile it wanted makes it impossible, and the line to the core is
+        recomputed for the distance it actually has to cover.
+
+        Refusals are left alone. A structure that does not fit where it was asked for is
+        an ordinary answer, and the policy should feel it as one rather than have it
+        quietly corrected.
+        """
+        bridge = self._ensure_started()
+        design = self.designs[int(action[1]) % len(self.designs)]
+        anchor = (int(action[2]), int(action[3]))
+        core = (int(self._last_obs.get("core_x", -1)), int(self._last_obs.get("core_y", -1)))
+        if core[0] < 0:
+            return
+
+        cells = [(anchor[0] + p.dx, anchor[1] + p.dy, p.block, p.rotation)
+                 for p in split(design).producers]
+        cells += route(anchor, core)
+        cells.sort(key=lambda cell: 0 if "drill" in cell[2] else 1)
+
+        for x, y, block, rotation in cells:
+            bridge.act({"type": "build" if self.embodied else "place",
+                        "block": block, "x": x, "y": y, "rotation": rotation})
+
     def _decode(self, action: np.ndarray) -> dict[str, Any] | None:
         kind = self.action_types[int(action[0])]
         x, y = int(action[2]), int(action[3])
 
         if kind == "noop":
+            return None
+        if kind == STAMP:
+            # Applied before the tick rather than as part of it: a structure is many
+            # placements and the step protocol carries one.
+            self._stamp(action)
             return None
         if kind in ("place", "build"):
             return {
@@ -335,6 +458,8 @@ class MindustryEnv(gym.Env):
         raw = self._load(bridge)
         if self._observation_space is None:
             self._build_spaces(raw)
+        else:
+            self._resize(raw)
 
         self._steps = 0
         self._last_obs = raw

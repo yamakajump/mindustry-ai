@@ -1,0 +1,49 @@
+{
+  "design": "cost-0.20",
+  "map": "Ancient_Caldera",
+  "world_seed": 36,
+  "steps": 450,
+  "blocks": 18,
+  "results": {
+    "alpha": {
+      "delivered": 141,
+      "all_delivered": 141,
+      "banked": 250,
+      "built": 48,
+      "applied": 47,
+      "refused": 9
+    },
+    "discovered": {
+      "delivered": 120,
+      "all_delivered": 120,
+      "banked": 250,
+      "built": 16,
+      "applied": 15,
+      "refused": 2
+    },
+    "discovered x3": {
+      "delivered": 199,
+      "all_delivered": 199,
+      "banked": 250,
+      "built": 51,
+      "applied": 50,
+      "refused": 37
+    },
+    "discovered x6": {
+      "delivered": 0,
+      "all_delivered": 0,
+      "banked": 0,
+      "built": 25,
+      "applied": 24,
+      "refused": 123
+    },
+    "random": {
+      "delivered": 0,
+      "all_delivered": 0,
+      "banked": 0,
+      "built": 40,
+      "applied": 43,
+      "refused": 221
+    }
+  }
+}

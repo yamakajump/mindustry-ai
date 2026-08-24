@@ -36,6 +36,7 @@ public class StepLoop implements ApplicationListener {
     private final ObservationEncoder encoder = new ObservationEncoder();
     private final ActionExecutor actions = new ActionExecutor();
     private final MapExporter exporter = new MapExporter();
+    private final SceneEncoder scenes = new SceneEncoder();
 
     /**
      * The agent's body, when it plays as a player rather than editing the world.
@@ -150,7 +151,12 @@ public class StepLoop implements ApplicationListener {
                 case "embody" -> handleEmbody();
                 case "map" -> handleMap();
                 case "sector" -> handleSector(message);
+                case "sectors" -> handleSectors();
                 case "observe" -> respond(observation(false));
+                case "scene" -> handleScene();
+                case "region" -> handleRegion(message);
+                case "give" -> handleGive(message);
+                case "clear_ore" -> handleClearOre(message);
                 case "close" -> handleClose();
                 default -> server.reply(error("unknown command: " + command.asString()));
             }
@@ -180,6 +186,26 @@ public class StepLoop implements ApplicationListener {
         server.reply(reply.toString());
     }
 
+    /**
+     * Pin the world's random draws, so the same request gives the same world.
+     *
+     * <p>A Mindustry map is not the fixed thing it looks like. Its ore is painted on at
+     * load time by generation filters, and {@code World.applyFilters} calls
+     * {@code filter.randomize()} on every one of them before running it, which draws a
+     * fresh seed from the global generator. Measured across three loads of the same map:
+     * 1339, 1543 and 1330 tiles of copper. Every "fixed map" task in this project has
+     * been handing the agent a different world each episode without saying so, and any
+     * two policies compared on one were compared on two.
+     *
+     * <p>Seeding the generator the filters draw from is enough to make a load
+     * reproducible. No seed means the engine's own behaviour, unchanged.
+     */
+    private void seedWorld(Jval message) {
+        if (message.get("seed") != null) {
+            arc.math.Mathf.rand.setSeed(message.get("seed").asInt());
+        }
+    }
+
     private void handleReset(Jval message) {
         String mapName = message.get("map") == null ? null : message.get("map").asString();
         String modeName = message.get("mode") == null ? "survival" : message.get("mode").asString();
@@ -196,14 +222,30 @@ public class StepLoop implements ApplicationListener {
 
         Gamemode mode = Gamemode.valueOf(modeName);
 
+        // Wrapped so anyone watching stays connected across the change. An episode ends
+        // several times an hour, and without this a spectator is dropped every time and has
+        // to rejoin to see the next one. This is the same handshake the official server
+        // uses to change map with players on it.
+        seedWorld(message);
+
+        var reloader = new mindustry.net.WorldReloader();
+        reloader.begin();
+
+        // The engine keeps team data across a world load: cores, buildings and plans from
+        // the previous match survive into the next one. The core of the old map then
+        // answers every question about where the base is, on a map where it does not
+        // exist. The game resets before it loads, and so does this.
+        Vars.logic.reset();
         Vars.world.loadMap(map, map.applyRules(mode));
         Vars.state.rules = map.applyRules(mode);
         Vars.logic.play();
         if (!Vars.net.server()) {
             Vars.netServer.openServer();
         }
+        reloader.end();
 
         encoder.rebuild();
+        scenes.reset();
         freeze();
         respond(observation(false));
     }
@@ -223,6 +265,7 @@ public class StepLoop implements ApplicationListener {
     }
 
     private void handleStep(Jval message) {
+        ensureBody();
         if (!Vars.state.isGame()) {
             server.reply(error("no game in progress, send reset first"));
             return;
@@ -257,6 +300,175 @@ public class StepLoop implements ApplicationListener {
         reply.put("ok", true);
         reply.put("affordable", actions.affordableBlocks());
         server.reply(reply.toString());
+    }
+
+    /**
+     * Everything that moved since the last call: units, buildings, shots.
+     *
+     * <p>Separate from the observation because the two have different audiences and
+     * different costs. The observation is what the policy consumes on every step of
+     * every environment; this is what a person watching one match consumes, and asking
+     * for it on a match nobody is looking at would be pure waste.
+     */
+    /**
+     * Give the agent a body again when it loses the one it had.
+     *
+     * <p>A unit that dies leaves its controller attached to a corpse: every order after
+     * that is accepted and does nothing, and the run keeps scoring an agent that has not
+     * been able to act for the rest of the episode. Silent, and total.
+     *
+     * <p>A player is never in that position. Lose your core unit and you respawn from the
+     * core, which is exactly what this does. With no core there is nothing to respawn
+     * from, and the episode is over anyway.
+     */
+    private void ensureBody() {
+        if (body == null) {
+            return;
+        }
+        var unit = body.unit();
+        if (unit != null && unit.isValid()) {
+            return;
+        }
+        PlayerAgent replacement = PlayerAgent.spawnAtCore();
+        if (replacement != null) {
+            body = replacement;
+        }
+    }
+
+    /**
+     * What the buildings in a rectangle are holding, and how many there are.
+     *
+     * <p>Exists to give a search something to climb. A conveyor line that reaches the core
+     * delivers; a line that stops one tile short delivers nothing at all, and the two look
+     * identical from outside. They do not look identical from inside: the second one is
+     * full of ore going nowhere. So the ore sitting in the blocks is the difference
+     * between "this design is close" and "this design is noise", and it is the engine's
+     * own number rather than a guess about what closeness means.
+     */
+    /**
+     * Put items into a building, so a bench can stand in for the rest of a factory.
+     *
+     * <p>A design that turns coal and sand into silicon cannot be measured without coal
+     * and sand, and mining them is a different problem being smuggled into this one. A
+     * filled container beside the work area says "assume this arrives" without saying
+     * anything about how.
+     */
+    private void handleGive(Jval message) {
+        int x = message.get("x") == null ? 0 : message.get("x").asInt();
+        int y = message.get("y") == null ? 0 : message.get("y").asInt();
+        String itemName = message.get("item") == null ? "" : message.get("item").asString();
+        int amount = message.get("amount") == null ? 0 : message.get("amount").asInt();
+
+        var tile = Vars.world.tile(x, y);
+        if (tile == null || tile.build == null) {
+            server.reply(error("no building at " + x + "," + y));
+            return;
+        }
+        var item = Vars.content.item(itemName);
+        if (item == null) {
+            server.reply(error("no such item: " + itemName));
+            return;
+        }
+        if (tile.build.items == null) {
+            server.reply(error(tile.block().name + " holds no items"));
+            return;
+        }
+
+        tile.build.items.set(item, Math.min(amount, tile.block().itemCapacity));
+
+        Jval reply = Jval.newObject();
+        reply.put("ok", true);
+        reply.put("held", tile.build.items.get(item));
+        server.reply(reply.toString());
+    }
+
+    /**
+     * Scrape a named ore off the map around a point.
+     *
+     * <p>A bench asking for a conveyor line has to make one necessary, and ore lying
+     * against the destination makes it unnecessary: the engine pushes from a drill into
+     * any adjacent building, so one drill on that ore delivers with no line at all. It is
+     * the correct answer to a question nobody asked, and a search finds it in two
+     * generations and never looks further.
+     *
+     * <p>Blanking that ore out of the scoring is not enough: it stays on the map and a
+     * drill can still sit on it. It has to leave the world.
+     */
+    private void handleClearOre(Jval message) {
+        int x = message.get("x") == null ? 0 : message.get("x").asInt();
+        int y = message.get("y") == null ? 0 : message.get("y").asInt();
+        int radius = message.get("radius") == null ? 0 : message.get("radius").asInt();
+        String itemName = message.get("item") == null ? "" : message.get("item").asString();
+
+        var item = Vars.content.item(itemName);
+        if (item == null) {
+            server.reply(error("no such item: " + itemName));
+            return;
+        }
+
+        int cleared = 0;
+        for (int tx = x - radius; tx <= x + radius; tx++) {
+            for (int ty = y - radius; ty <= y + radius; ty++) {
+                var tile = Vars.world.tile(tx, ty);
+                if (tile == null || tile.drop() != item) {
+                    continue;
+                }
+                tile.setOverlayNet(mindustry.content.Blocks.air);
+                cleared++;
+            }
+        }
+
+        Jval reply = Jval.newObject();
+        reply.put("ok", true);
+        reply.put("cleared", cleared);
+        server.reply(reply.toString());
+    }
+
+    private void handleRegion(Jval message) {
+        int x = message.get("x") == null ? 0 : message.get("x").asInt();
+        int y = message.get("y") == null ? 0 : message.get("y").asInt();
+        int w = message.get("width") == null ? 1 : message.get("width").asInt();
+        int h = message.get("height") == null ? 1 : message.get("height").asInt();
+
+        Jval held = Jval.newObject();
+        int buildings = 0;
+        var counted = new arc.struct.IntSet();
+
+        for (int tx = x; tx < x + w; tx++) {
+            for (int ty = y; ty < y + h; ty++) {
+                var tile = Vars.world.tile(tx, ty);
+                if (tile == null || tile.build == null) {
+                    continue;
+                }
+                // A multi-tile building answers on every tile it covers, so it would be
+                // counted once per square without this.
+                if (!counted.add(tile.build.id)) {
+                    continue;
+                }
+                buildings++;
+                if (tile.build.items == null) {
+                    continue;
+                }
+                for (var item : Vars.content.items()) {
+                    int amount = tile.build.items.get(item);
+                    if (amount > 0) {
+                        held.put(item.name, (held.has(item.name)
+                            ? held.get(item.name).asInt() : 0) + amount);
+                    }
+                }
+            }
+        }
+
+        Jval reply = Jval.newObject();
+        reply.put("ok", true);
+        reply.put("buildings", buildings);
+        reply.put("held", held);
+        server.reply(reply.toString());
+    }
+
+    private void handleScene() {
+        int agent = body != null && body.unit() != null ? body.unit().id() : -1;
+        server.reply(scenes.encode(agent, body == null ? null : body.takeDeposit()).toString());
     }
 
     /**
@@ -299,28 +511,163 @@ public class StepLoop implements ApplicationListener {
      * meaningful benchmark than a number invented for a custom map.
      */
     private void handleSector(Jval message) {
-        String name = message.get("name") == null ? "groundZero" : message.get("name").asString();
+        mindustry.type.Sector sector;
 
-        mindustry.type.SectorPreset preset = Vars.content.getByName(
-            mindustry.ctype.ContentType.sector, name);
-        if (preset == null) {
-            server.reply(error("no such sector: " + name));
-            return;
+        if (message.get("index") != null) {
+            // A procedural sector, generated by the planet's own generator. Serpulo has
+            // several hundred of them, which is what turns "learn this map" into "learn
+            // the game": an agent that meets a new world every episode cannot memorise
+            // where the copper is.
+            mindustry.type.Planet planet = serpulo();
+            int index = message.get("index").asInt();
+            if (planet == null || index < 0 || index >= planet.sectors.size) {
+                server.reply(error("no sector at index " + index));
+                return;
+            }
+            sector = planet.sectors.get(index);
+            // Enemy bases are stamped from a registry of prefabs that a headless server
+            // never loads, and the generator walks straight into a null item. The sector
+            // still has its wave spawns, which is where the pressure comes from anyway.
+            sector.generateEnemyBase = false;
+        } else {
+            String name = message.get("name") == null ? "groundZero" : message.get("name").asString();
+            mindustry.type.SectorPreset preset = Vars.content.getByName(
+                mindustry.ctype.ContentType.sector, name);
+            if (preset == null) {
+                server.reply(error("no such sector: " + name));
+                return;
+            }
+            sector = preset.sector;
         }
 
-        Vars.world.loadSector(preset.sector);
-        Vars.state.rules.sector = preset.sector;
+        // Wrapped so anyone watching stays connected across the change. An episode ends
+        // several times an hour, and without this a spectator is dropped every time and has
+        // to rejoin to see the next one. This is the same handshake the official server
+        // uses to change map with players on it.
+        seedWorld(message);
+
+        var reloader = new mindustry.net.WorldReloader();
+        reloader.begin();
+
+        // The engine keeps team data across a world load: cores, buildings and plans from
+        // the previous match survive into the next one. The core of the old map then
+        // answers every question about where the base is, on a map where it does not
+        // exist. The game resets before it loads, and so does this.
+        Vars.logic.reset();
+        Vars.world.loadSector(sector);
+        Vars.state.rules.sector = sector;
         Vars.logic.play();
         if (!Vars.net.server()) {
             Vars.netServer.openServer();
         }
+        reloader.end();
 
         prepareCampaign();
+        if (!ensureCore()) {
+            server.reply(error("no room for a core on this sector"));
+            return;
+        }
         applyLoadout(message.get("loadout"));
 
         encoder.rebuild();
+        scenes.reset();
         freeze();
         respond(observation(false));
+    }
+
+    /**
+     * Give the team a core, because a generated sector does not come with one.
+     *
+     * <p>In the campaign you land on a sector and the launch places your loadout. Loading
+     * one directly skips all of that and hands back a world with terrain, spawns and no
+     * way to play it. A core shard on the first clear ground near the middle is the
+     * smallest thing that makes the sector a game, and it is what the smallest launch
+     * loadout would have given.
+     *
+     * @return false when the sector has no room at all, which is a sector to skip
+     */
+    private boolean ensureCore() {
+        if (Vars.state.rules.defaultTeam.core() != null) {
+            return true;
+        }
+
+        int width = Vars.world.width(), height = Vars.world.height();
+        int cx = width / 2, cy = height / 2;
+        int reach = Math.max(width, height) / 2;
+
+        // Outward from the middle, because the middle is furthest from the wave spawns
+        // that sit on the rim.
+        for (int radius = 0; radius < reach; radius += 2) {
+            for (int dx = -radius; dx <= radius; dx += 2) {
+                for (int dy = -radius; dy <= radius; dy += 2) {
+                    if (Math.max(Math.abs(dx), Math.abs(dy)) != radius && radius > 0) {
+                        continue;
+                    }
+                    int x = cx + dx, y = cy + dy;
+                    if (clearFor(x, y, 3)) {
+                        Vars.world.tile(x, y).setBlock(
+                            mindustry.content.Blocks.coreShard, Vars.state.rules.defaultTeam);
+                        Log.info("[mindustry-ai] placed a core at @,@", x, y);
+                        return Vars.state.rules.defaultTeam.core() != null;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /** Whether a square of the given size centred here is open ground. */
+    private boolean clearFor(int x, int y, int size) {
+        int half = size / 2 + 1;
+        for (int ox = -half; ox <= half; ox++) {
+            for (int oy = -half; oy <= half; oy++) {
+                var tile = Vars.world.tile(x + ox, y + oy);
+                if (tile == null || tile.solid() || tile.floor().isLiquid || tile.block() != mindustry.content.Blocks.air) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    /** Serpulo, the planet the whole curriculum lives on. */
+    private mindustry.type.Planet serpulo() {
+        return Vars.content.planets().find(planet -> planet.name.equals("serpulo"));
+    }
+
+    /**
+     * Every sector a training run may draw from, with the numbers needed to choose.
+     *
+     * <p>Only the procedural ones: a preset sector is a hand-made map with a script, and
+     * there are a dozen of them against several hundred generated. Threat travels with
+     * each, because a curriculum that widens from calm sectors to dangerous ones is the
+     * cheapest difficulty ordering available and the game already computed it.
+     */
+    private void handleSectors() {
+        mindustry.type.Planet planet = serpulo();
+        if (planet == null) {
+            server.reply(error("serpulo is missing"));
+            return;
+        }
+
+        Jval indices = Jval.newArray();
+        Jval threats = Jval.newArray();
+        for (int i = 0; i < planet.sectors.size; i++) {
+            mindustry.type.Sector sector = planet.sectors.get(i);
+            if (sector.preset != null) {
+                continue;
+            }
+            indices.asArray().add(Jval.valueOf(i));
+            threats.asArray().add(Jval.valueOf(Math.round(sector.threat * 100) / 100.0));
+        }
+
+        Jval reply = Jval.newObject();
+        reply.put("ok", true);
+        reply.put("planet", planet.name);
+        reply.put("total", planet.sectors.size);
+        reply.put("sectors", indices);
+        reply.put("threats", threats);
+        server.reply(reply.toString());
     }
 
     /**
@@ -341,6 +688,27 @@ public class StepLoop implements ApplicationListener {
     private void prepareCampaign() {
         Vars.state.rules.waves = true;
         Vars.state.rules.waveTimer = true;
+
+        // Ground Zero is the campaign's tutorial sector, and its map carries the tutorial
+        // script: build a drill, open the tech tree, research this. An agent is not doing
+        // a tutorial, and leaving the script running puts objectives on screen for anyone
+        // watching that have nothing to do with what the run is measuring.
+        if (Vars.state.rules.objectives != null) {
+            Vars.state.rules.objectives.clear();
+        }
+        Vars.state.rules.objectiveFlags.clear();
+
+        // Fog hides everything the team has not explored, which is a mechanic for a human
+        // discovering a map and pure noise for a training run: it makes a spectator think
+        // the agent is building in the void, and it hides the map from anyone watching.
+        Vars.state.rules.fog = false;
+        Vars.state.rules.staticFog = false;
+
+        Log.info("[mindustry-ai] sector prepared: limit=@ rect=@,@ @x@ fog=@ waves=@ size=@x@",
+            Vars.state.rules.limitMapArea, Vars.state.rules.limitX, Vars.state.rules.limitY,
+            Vars.state.rules.limitWidth, Vars.state.rules.limitHeight,
+            Vars.state.rules.fog, Vars.state.rules.waves,
+            Vars.world.width(), Vars.world.height());
 
         for (var block : Vars.content.blocks()) {
             if (block.isPlaceable()) {
@@ -387,10 +755,27 @@ public class StepLoop implements ApplicationListener {
                 break;
             }
         }
-        if (empty) {
-            for (var stack : Vars.state.rules.loadout) {
+        if (!empty) {
+            return;
+        }
+
+        int given = 0;
+        for (var stack : Vars.state.rules.loadout) {
+            // A generated sector carries a loadout with null entries in it, and adding one
+            // throws inside the engine's item module with nothing to say which stack was
+            // at fault. Skipped rather than trusted.
+            if (stack != null && stack.item != null) {
                 core.items.add(stack.item, Math.min(stack.amount, core.storageCapacity));
+                given += stack.amount;
             }
+        }
+
+        if (given == 0) {
+            // Nothing usable in the rules, which is the normal case for a sector loaded
+            // outside a launch. An empty core is an unplayable sector, so it gets what the
+            // smallest launch loadout would have carried.
+            core.items.add(mindustry.content.Items.copper, Math.min(300, core.storageCapacity));
+            core.items.add(mindustry.content.Items.lead, Math.min(300, core.storageCapacity));
         }
     }
 
@@ -497,6 +882,10 @@ public class StepLoop implements ApplicationListener {
         obs.put("wave_time", Vars.state.wavetime);
         obs.put("enemies", Vars.state.enemies);
         obs.put("game_over", Vars.state.gameOver);
+        // What the team has standing. The reward uses it as the measure of capability: a
+        // pile of ore is a stock, a factory is a machine that keeps making one.
+        obs.put("built", playing && Vars.state.rules != null
+            ? Vars.state.rules.defaultTeam.data().buildings.size : 0);
 
         if (lastAction != null) {
             Jval outcome = Jval.newObject();
@@ -513,6 +902,7 @@ public class StepLoop implements ApplicationListener {
         Jval items = Jval.newObject();
         obs.put("has_core", false);
         obs.put("core_health", 0);
+        obs.put("core_max_health", 0);
         obs.put("core_x", -1);
         obs.put("core_y", -1);
         obs.put("map_width", Vars.world.width());
@@ -523,6 +913,7 @@ public class StepLoop implements ApplicationListener {
             obs.put("has_core", core != null);
             if (core != null) {
                 obs.put("core_health", core.health());
+                obs.put("core_max_health", core.maxHealth());
                 obs.put("core_x", core.tileX());
                 obs.put("core_y", core.tileY());
 
@@ -535,6 +926,50 @@ public class StepLoop implements ApplicationListener {
             }
         }
         obs.put("items", items);
+
+        // Counters the engine already keeps, reset by `logic.play()` at the start of every
+        // episode. They matter because they are **monotonic**: a milestone paid the step a
+        // counter first crosses a threshold can be paid at most once per episode, without
+        // the reward function having to remember anything. A count of what is standing
+        // right now goes up and down, so paying for it pays for building and rebuilding
+        // the same conveyor forever.
+        Jval stats = Jval.newObject();
+        Jval produced = Jval.newObject();
+        Jval placed = Jval.newObject();
+
+        if (playing && Vars.state.stats != null) {
+            var game = Vars.state.stats;
+            stats.put("enemy_units_destroyed", game.enemyUnitsDestroyed);
+            stats.put("buildings_built", game.buildingsBuilt);
+            stats.put("buildings_destroyed", game.buildingsDestroyed);
+            stats.put("buildings_deconstructed", game.buildingsDeconstructed);
+            stats.put("units_created", game.unitsCreated);
+
+            // The engine counts items that reach the core *through a transport block*, and
+            // only those: a hand deposit goes through `handleStack` and is never counted, a
+            // launch loadout is written straight into the inventory. So this is automated
+            // income, separated from hand mining by the game itself rather than by anything
+            // invented here. It is the one number that says a factory exists.
+            for (var entry : game.coreItemCount.entries()) {
+                if (entry.value > 0) {
+                    produced.put(entry.key.name, entry.value);
+                }
+            }
+
+            // Blocks fully built, cumulative, grouped by the game's own category. Enough to
+            // notice a first drill, a first conveyor, a first turret, without this file
+            // holding a list of block names that would rot the next time the game adds one.
+            for (var entry : game.placedBlockCount.entries()) {
+                if (entry.value > 0 && entry.key.category != null) {
+                    String name = entry.key.category.name();
+                    placed.put(name, placed.has(name) ? placed.get(name).asInt() + entry.value : entry.value);
+                }
+            }
+        }
+
+        obs.put("stats", stats);
+        obs.put("produced", produced);
+        obs.put("placed", placed);
 
         if (body != null && body.unit() != null) {
             var unit = body.unit();

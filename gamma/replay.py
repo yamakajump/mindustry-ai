@@ -89,6 +89,18 @@ class ReplayRecorder:
             "description": self.env.task.description,
             "map": self.env.task.map_name,
             "note": self.note,
+            # Enough to put the same world back on a server and re-run the episode for
+            # real. A generated sector has no name, so the index is the only handle on
+            # it, and without it `tools/watch.py` had nothing to load and the in-game
+            # reader said "Map not found:" with nothing after the colon.
+            "sector": self.env.task.sector,
+            "sector_index": self.env.sector_index,
+            "loadout": self.env.task.loadout,
+            # Whether the agent had a body. A replay of an embodied episode re-run
+            # without one shows blocks appearing out of nowhere instead of a unit flying
+            # over to build them, which is not what happened.
+            "embodied": bool(self.env.embodied),
+            "ticks_per_step": self.env.task.ticks_per_step,
             "width": typed["width"],
             "height": typed["height"],
             "core": [int(raw.get("core_x", -1)), int(raw.get("core_y", -1))],
@@ -130,6 +142,12 @@ class ReplayRecorder:
         added: list[list[int]] = []
         removed: list[list[int]] = []
 
+        if self._previous is not None and self._previous.shape != current.shape:
+            # The map changed size under the recording, which the environment refuses on
+            # the next reset. Nothing here can salvage the file, but the diff is not the
+            # place to report it: a broadcast error from a delta hides the actual fault.
+            self._previous = None
+
         if self._previous is not None:
             changed = np.argwhere(current != self._previous)
             for y, x in changed:
@@ -155,21 +173,40 @@ class ReplayRecorder:
         # became occupied; only the action says by what, and a viewer needs the block
         # identity to pick a sprite. It also costs less than the deltas it replaces.
         if action is not None and outcome is not None and outcome.get("applied"):
-            kind = int(action[0])
-            if kind == 1:
+            # By name, never by index. The embodied action space puts `move` and `build`
+            # where the direct one puts `place` and `break`, so a hardcoded index records
+            # a move as a construction and the viewer draws a block that was never built.
+            kind = self.env.action_types[int(action[0])]
+            if kind in ("place", "build"):
                 frame["act"] = {
                     "t": "place",
                     "b": self.env.blocks[int(action[1])],
                     "x": int(action[2]), "y": int(action[3]), "r": int(action[4]),
                 }
-            elif kind == 2:
+            elif kind == "break":
                 frame["act"] = {"t": "break", "x": int(action[2]), "y": int(action[3])}
+            elif kind in ("move", "mine"):
+                frame["act"] = {"t": kind, "x": int(action[2]), "y": int(action[3])}
+            elif kind == "unload":
+                # How an embodied agent banks what it carries. Left out, a re-run of the
+                # episode never pays anything into the core, so it cannot afford the
+                # blocks it went on to build and the replay diverges from what happened.
+                frame["act"] = {"t": "unload"}
         return frame
 
-    def close(self) -> None:
+    def finish(self) -> None:
+        """Close the current recording without closing the environment.
+
+        A run that records episode after episode needs the file sealed before it can be
+        renamed by its result, while the environment carries straight on into the next
+        episode. Closing both together would end the run at the first episode.
+        """
         if self._file is not None:
             self._file.close()
             self._file = None
+
+    def close(self) -> None:
+        self.finish()
         self.env.close()
 
 

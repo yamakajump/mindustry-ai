@@ -171,11 +171,21 @@ class Bridge:
         # into a fresh array the caller can safely hold on to.
         return np.frombuffer(payload, dtype=np.uint8).reshape(shape)
 
-    def reset(self, map_name: str | None = None, mode: str = "survival") -> dict[str, Any]:
-        """Load a map and start a match. Returns the initial observation."""
+    def reset(self, map_name: str | None = None, mode: str = "survival",
+              seed: int | None = None) -> dict[str, Any]:
+        """Load a map and start a match. Returns the initial observation.
+
+        A seed pins the world. Mindustry paints ore on at load time with generation
+        filters and re-randomises every one of them on every load, so the same map name
+        gives a different world each time: measured across three loads, 1339, 1543 and
+        1330 tiles of copper. Pass a seed when two runs have to be comparable, and leave
+        it out when variety is the point.
+        """
         message: dict[str, Any] = {"cmd": "reset", "mode": mode}
         if map_name is not None:
             message["map"] = map_name
+        if seed is not None:
+            message["seed"] = int(seed)
         return self.request(message)
 
     def step(
@@ -217,12 +227,65 @@ class Bridge:
         """
         return self.request({"cmd": "map"})
 
-    def sector(self, name: str = "groundZero", loadout: dict[str, int] | None = None):
-        """Load a campaign sector, such as Ground Zero, the first of the Serpulo campaign."""
-        message: dict[str, Any] = {"cmd": "sector", "name": name}
+    def sector(
+        self,
+        name: str | None = "groundZero",
+        loadout: dict[str, int] | None = None,
+        index: int | None = None,
+        seed: int | None = None,
+    ):
+        """Load a campaign sector, by name for a preset or by index for a generated one.
+
+        An index draws from the several hundred procedural sectors on Serpulo. A name
+        picks one of the dozen hand-made presets, Ground Zero among them.
+        """
+        message: dict[str, Any] = {"cmd": "sector"}
+        if index is not None:
+            message["index"] = int(index)
+        else:
+            message["name"] = name
         if loadout is not None:
             message["loadout"] = loadout
+        if seed is not None:
+            message["seed"] = int(seed)
         return self.request(message)
+
+    def region(self, x: int, y: int, width: int, height: int) -> dict[str, Any]:
+        """What the buildings in a rectangle are holding, and how many there are.
+
+        A conveyor line that reaches the core delivers; a line stopping one tile short
+        delivers nothing, and from outside the two are identical. From inside they are
+        not: the second is full of ore going nowhere. This is what tells a search that a
+        design is close rather than that it is noise, and it is the engine's own count
+        rather than a guess about what closeness means.
+        """
+        return self.request({
+            "cmd": "region", "x": int(x), "y": int(y),
+            "width": int(width), "height": int(height),
+        })
+
+    def give(self, x: int, y: int, item: str, amount: int) -> dict[str, Any]:
+        """Put items into a building, so a bench can stand in for the rest of a factory."""
+        return self.request({
+            "cmd": "give", "x": int(x), "y": int(y),
+            "item": item, "amount": int(amount),
+        })
+
+    def clear_ore(self, x: int, y: int, radius: int, item: str) -> dict[str, Any]:
+        """Scrape a named ore off the map around a point.
+
+        A bench asking for a conveyor line has to make one necessary, and ore lying against
+        the destination makes it unnecessary: the engine pushes from a drill into any
+        adjacent building, so one drill on that ore delivers with no line at all.
+        """
+        return self.request({
+            "cmd": "clear_ore", "x": int(x), "y": int(y),
+            "radius": int(radius), "item": item,
+        })
+
+    def sectors(self) -> dict[str, Any]:
+        """Every procedural sector on Serpulo, with the threat the game assigned it."""
+        return self.request({"cmd": "sectors"})
 
     def embody(self) -> dict[str, Any]:
         """Give the agent a unit, so it plays under a player's limits.
@@ -240,3 +303,12 @@ class Bridge:
     def observe(self) -> dict[str, Any]:
         """Read current state without advancing the world."""
         return self.request({"cmd": "observe"})
+
+    def scene(self) -> dict[str, Any]:
+        """Everything that moved since the last call: units, buildings, shots.
+
+        Deltas, so calling it every step is cheap, and calling it once after a thousand
+        steps returns only what differs from the last frame the caller actually saw. That
+        makes it safe to poll from a dashboard at whatever rate the browser manages.
+        """
+        return self.request({"cmd": "scene"})

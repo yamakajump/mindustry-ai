@@ -84,25 +84,57 @@ def test_affordable_blocks_reflect_the_wallet(acting) -> None:
     assert "thorium-reactor" not in affordable
 
 
-def test_a_built_chain_delivers_ore_to_the_core(acting) -> None:
+@pytest.fixture
+def building(bridge_server, bridge_ports):
+    """A match with no waves in it, for the one test that has to run for ten game minutes.
+
+    In survival the enemy arrives long before a mechanical drill has filled a conveyor,
+    and the run this test does is long enough that the base was regularly destroyed
+    mid-measurement. It then reported that the chain had delivered nothing, which was true
+    and told us nothing: a test that fails because the map killed it is measuring the map.
+    """
+    with Bridge(port=bridge_ports[0], tensor=True) as client:
+        obs = client.reset("Ancient_Caldera", "sandbox")
+        yield client, obs
+
+
+def test_a_built_chain_delivers_ore_to_the_core(building) -> None:
     """The end to end proof, and curriculum stage T1 in miniature.
 
     A drill on an ore patch, a conveyor line to the core, and copper must actually
     arrive. This exercises every layer at once: action execution, the economy, the
     simulation running under acceleration, and the tensor used to find the ore.
+
+    Delivery is read off the engine's own transport counter rather than off the core's
+    stock. The counter answers the question this test actually asks, which is whether ore
+    travelled down the conveyor, and it answers it whether the core happened to be full or
+    empty at the time.
     """
-    client, obs = acting
+    client, obs = building
     core_x, core_y = obs["core_x"], obs["core_y"]
 
     copper = obs["spatial"][client.channels.index("ore_copper")]
     ys, xs = np.where(copper > 0)
     assert len(xs) > 0, "no copper on this map"
-    nearest = int(np.argmin((xs - core_x) ** 2 + (ys - core_y) ** 2))
-    ore_x, ore_y = int(xs[nearest]), int(ys[nearest])
 
-    assert client.act(
-        {"type": "place", "block": "mechanical-drill", "x": ore_x, "y": ore_y}
-    )["action"]["applied"]
+    # Closest first, but not the closest only. A mechanical drill covers two tiles by two,
+    # so the nearest ore tile is regularly one whose footprint runs into a wall or another
+    # ore body, and the engine refuses it. Insisting on that one tile made this test fail
+    # on a map it had no quarrel with.
+    order = np.argsort((xs - core_x) ** 2 + (ys - core_y) ** 2)
+    refusals = []
+    ore_x = ore_y = None
+    for candidate in order[:40]:
+        x, y = int(xs[candidate]), int(ys[candidate])
+        outcome = client.act(
+            {"type": "place", "block": "mechanical-drill", "x": x, "y": y}
+        )["action"]
+        if outcome["applied"]:
+            ore_x, ore_y = x, y
+            break
+        refusals.append(f"({x},{y}) {outcome.get('reason', 'no reason')}")
+
+    assert ore_x is not None, "no copper tile took a drill: " + "; ".join(refusals[:5])
 
     # Build the path first, then orient each conveyor towards the next tile on it.
     # Deriving rotation from the segment instead would leave the corner tile pointing
@@ -119,26 +151,36 @@ def test_a_built_chain_delivers_ore_to_the_core(acting) -> None:
 
     # Mindustry rotations: 0 right, 1 up, 2 left, 3 down.
     directions = {(1, 0): 0, (0, 1): 1, (-1, 0): 2, (0, -1): 3}
+    conveyors = 0
     for index, (px, py) in enumerate(path):
         nx, ny = path[index + 1] if index + 1 < len(path) else (core_x, core_y)
         rotation = directions.get((np.sign(nx - px), np.sign(ny - py)))
         if rotation is None:
             continue
-        client.act({
+        outcome = client.act({
             "type": "place", "block": "conveyor",
             "x": px, "y": py, "rotation": int(rotation),
-        })
-
-    before = client.observe()["items"].get("copper", 0)
+        })["action"]
+        conveyors += bool(outcome["applied"])
 
     # Runs until delivery is observed rather than for a fixed budget. A drill's output
     # depends on how far the chain had to run, and a fixed number of steps made this pass
     # alone and fail in a full suite for no reason anyone could see.
-    after = before
+    result = client.observe()
     for _ in range(120):
         result = client.step(repeat=300)
-        after = result["items"].get("copper", 0)
-        if after > before:
+        if result["produced"].get("copper", 0) > 0:
             break
 
-    assert after > before, f"the chain delivered nothing after 36000 ticks: {before} -> {after}"
+    delivered = result["produced"].get("copper", 0)
+    assert delivered > 0, "the chain delivered nothing after 36000 ticks"
+
+    # The same counters the frontier reward is built on, checked here against a real chain
+    # rather than a made-up observation. `produced` counts only what came down a transport
+    # block, never what a unit carried in by hand, which is the distinction the whole
+    # reward rests on.
+    # Counted against what the engine actually accepted, not against what was asked for.
+    # A drill that lands next to the core needs no conveyor at all, and the run where this
+    # test insisted on one was a test measuring where the ore happened to be.
+    assert result["placed"].get("production", 0) == 1, "the drill was not counted as placed"
+    assert result["placed"].get("distribution", 0) == conveyors, "conveyors miscounted"
