@@ -491,7 +491,9 @@ class TrainingMonitor:
                     return
 
                 body = target.read_bytes()
-                kind = "text/html" if target.suffix == ".html" else "application/octet-stream"
+                kind = {
+                    ".html": "text/html", ".json": "application/json", ".png": "image/png",
+                }.get(target.suffix, "application/octet-stream")
                 self.send_response(200)
                 self.send_header("Content-Type", kind)
                 self.send_header("Content-Length", str(len(body)))

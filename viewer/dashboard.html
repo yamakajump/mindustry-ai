@@ -350,23 +350,47 @@ document.getElementById("lang").onclick = () => {
 };
 
 // Sprites ----------------------------------------------------------------------
-let atlas = null, atlasIndex = null;
+let spriteIndex = null;
 const cards = new Map();
 let detailIndex = null;
 
-async function loadAtlas() {
-  if (atlas || atlasIndex === false) return;
+/**
+ * Sprites are fetched one at a time, the first time something needs one.
+ *
+ * The whole game is on disk, fifteen hundred sprite groups of it, and packing that into
+ * one atlas would be a five-thousand-pixel image costing a hundred megabytes of memory to
+ * cover blocks no run will ever build. A match draws a few dozen sprites, so they are
+ * loaded as they come up and kept. Nothing is paid for a tier the agent has not reached.
+ */
+async function loadIndex() {
+  if (spriteIndex !== null) return;
   try {
-    const meta = await (await fetch("assets/atlas.json")).json();
-    const image = new Image();
-    await new Promise((ok, no) => { image.onload = ok; image.onerror = no; image.src = "assets/atlas.png"; });
-    atlas = image;
-    atlasIndex = meta.sprites;
+    spriteIndex = (await (await fetch("assets/index.json")).json()).sprites;
   } catch {
-    atlasIndex = false;   // Flat colours beat an empty screen.
+    spriteIndex = false;   // Flat colours beat an empty screen.
   }
 }
-const spriteOf = name => (atlasIndex && name) ? (atlasIndex[name] || null) : null;
+
+/** Loaded images by file name. `null` while in flight, `false` once known missing. */
+const images = new Map();
+
+function imageOf(stem) {
+  const known = images.get(stem);
+  if (known !== undefined) return known || null;
+
+  images.set(stem, null);
+  const image = new Image();
+  image.onload = () => images.set(stem, image);
+  image.onerror = () => images.set(stem, false);
+  image.src = `assets/sprites/${encodeURIComponent(stem)}.png`;
+  return null;
+}
+
+/** The sprite group behind a name: its size in tiles, its variants, its sheet grid. */
+const spriteOf = name => (spriteIndex && name) ? (spriteIndex[name] || null) : null;
+
+/** The image for a whole group, or for one of its variants once seeded. */
+const imageFor = (entry, seed) => entry ? imageOf(frameOf(entry, seed)) : null;
 
 /**
  * Scramble a tile index into a variant choice.
@@ -385,10 +409,11 @@ function tileHash(n) {
   return (n ^ (n >>> 15)) >>> 0;
 }
 
-/** The variant of a sprite this tile should use. */
+/** The file name of the variant this tile should use. */
 function frameOf(entry, tile) {
   const frames = entry.frames;
-  if (!frames || frames.length < 2) return entry;
+  if (!frames || !frames.length) return null;
+  if (frames.length < 2 || tile === undefined) return frames[0];
   return frames[tileHash(tile) % frames.length];
 }
 
@@ -730,19 +755,18 @@ function randLenVectors(seed, count, length, each) {
  */
 const tintCache = new Map();
 function tinted(name, colour) {
-  return tintedFrame(name, spriteOf(name), colour);
+  return tintedImage(name, imageFor(spriteOf(name)), colour);
 }
 
-function tintedFrame(name, s, colour) {
-  const key = `${name}|${s ? s.x : "-"}|${s ? s.y : "-"}|${colour}`;
-  const known = tintCache.get(key);
-  if (known !== undefined) return known;
+function tintedImage(key, image, colour) {
+  const cached = tintCache.get(key + "|" + colour);
+  if (cached !== undefined) return cached;
+  if (!image) return null;      // Not cached: the image may still be on its way.
 
-  if (!s || !atlas) { tintCache.set(key, null); return null; }
-
-  const canvas = Object.assign(document.createElement("canvas"), { width: s.w, height: s.h });
+  const canvas = Object.assign(document.createElement("canvas"),
+    { width: image.width, height: image.height });
   const ctx = canvas.getContext("2d");
-  ctx.drawImage(atlas, s.x, s.y, s.w, s.h, 0, 0, s.w, s.h);
+  ctx.drawImage(image, 0, 0);
 
   // Multiplied, not replaced. `Draw.color` sets a vertex colour that multiplies the
   // texture, so a team plate keeps its bevels and its shading and comes out as the
@@ -754,9 +778,9 @@ function tintedFrame(name, s, colour) {
   // Multiply leaves the transparent margin coloured, so the sprite is stamped back over
   // it as a mask.
   ctx.globalCompositeOperation = "destination-in";
-  ctx.drawImage(atlas, s.x, s.y, s.w, s.h, 0, 0, s.w, s.h);
+  ctx.drawImage(image, 0, 0);
 
-  tintCache.set(key, canvas);
+  tintCache.set(key + "|" + colour, canvas);
   return canvas;
 }
 
@@ -939,12 +963,12 @@ function terrainLayer(terrain, world, ox, oy, cols, rows, cell, walls) {
   const paint = (id, x, y, tile, fallback) => {
     const name = nameOf(id);
     const s = name ? spriteOf(name) : null;
+    const image = imageFor(s, tile);
     const px = (x - ox) * cell, py = (top - y) * cell;
-    if (s) {
-      const f = frameOf(s, tile);
+    if (image) {
       const tiles = s.tiles || 1;
       const offset = Math.floor((tiles - 1) / 2);
-      ctx.drawImage(atlas, f.x, f.y, f.w, f.h,
+      ctx.drawImage(image,
         px - offset * cell, py - (tiles - 1 - offset) * cell, tiles * cell, tiles * cell);
     } else if (fallback) {
       ctx.fillStyle = fallback;
@@ -975,11 +999,12 @@ function terrainLayer(terrain, world, ox, oy, cols, rows, cell, walls) {
         const other = terrain.floor[ny * mapW + nx];
         if (blendOf(terrain, other) <= here) continue;
         const sheet = spriteOf(nameOf(other) + "-edge");
-        if (!sheet || !sheet.grid) continue;
+        const image = imageFor(sheet);
+        if (!sheet || !sheet.grid || !image) continue;
 
-        const unit = sheet.w / sheet.grid;
+        const unit = image.width / sheet.grid;
         const col = 1 - dx, row = 1 + dy;
-        ctx.drawImage(atlas, sheet.x + col * unit, sheet.y + row * unit, unit, unit,
+        ctx.drawImage(image, col * unit, row * unit, unit, unit,
           (x - ox) * cell, (top - y) * cell, cell, cell);
       }
     }
@@ -996,9 +1021,10 @@ function terrainLayer(terrain, world, ox, oy, cols, rows, cell, walls) {
   const paintWall = (id, x, y, i) => {
     const name = nameOf(id);
     const sheet = name ? spriteOf(name + "-large") : null;
+    const sheetImage = imageFor(sheet);
     const bx = x - (x & 1), by = y - (y & 1);
 
-    const uniform = sheet && bx + 1 < mapW && by + 1 < mapH
+    const uniform = sheet && sheetImage && bx + 1 < mapW && by + 1 < mapH
       && terrain.block[by * mapW + bx] === id
       && terrain.block[by * mapW + bx + 1] === id
       && terrain.block[(by + 1) * mapW + bx] === id
@@ -1007,11 +1033,11 @@ function terrainLayer(terrain, world, ox, oy, cols, rows, cell, walls) {
     // Half the aligned blocks get the big rock, which is what breaks up the grid without
     // erasing the variants entirely.
     if (uniform && tileHash(by * mapW + bx) % 2 === 0) {
-      const unit = sheet.w / sheet.grid;
+      const unit = sheetImage.width / sheet.grid;
       // The sheet is the assembled rock, so a quadrant goes back where it came from:
       // column with x, row against y.
       const col = x - bx, row = 1 - (y - by);
-      ctx.drawImage(atlas, sheet.x + col * unit, sheet.y + row * unit, unit, unit,
+      ctx.drawImage(sheetImage, col * unit, row * unit, unit, unit,
         (x - ox) * cell, (top - y) * cell, cell, cell);
       return;
     }
@@ -1217,9 +1243,9 @@ function drawBlockSprite(ctx, world, tile, b, info, v) {
   const left = v.sx(x - offset), top = v.sy(y + size - 1 - offset);
   const cx = left + span / 2, cy = top + span / 2;
 
-  const blit = (sprite, frame) => {
-    const f = frame || sprite;
-    ctx.drawImage(atlas, f.x, f.y, f.w, f.h, -span / 2, -span / 2, span, span);
+  const blit = (entry, seed) => {
+    const image = imageFor(entry, seed);
+    if (image) ctx.drawImage(image, -span / 2, -span / 2, span, span);
   };
 
   ctx.save();
@@ -1230,14 +1256,14 @@ function drawBlockSprite(ctx, world, tile, b, info, v) {
     // again here is how a viewer draws a junction where the game draws a straight run.
     const shape = world.belts.get(tile);
     const belt = spriteOf(`conveyor-${shape ? shape.bits : 0}`);
-    if (belt) {
-      const frames = belt.frames || [belt];
-      // The belt runs on the simulation clock, not the browser's, so a match watched at
-      // double speed shows its belts running at double speed too.
-      const frame = frames[Math.floor(Math.abs(tick) * CONVEYOR_RATE) % frames.length];
+    if (belt && belt.frames.length) {
+      // The belt runs on the simulation clock, not the one in the browser, so a match
+      // watched at double speed shows its belts running at double speed too.
+      const frame = Math.floor(Math.abs(tick) * CONVEYOR_RATE) % belt.frames.length;
+      const image = imageOf(belt.frames[frame]);
       ctx.rotate(-b.rot * Math.PI / 2);
       ctx.scale(1, shape ? shape.flip : 1);
-      blit(belt, frame);
+      if (image) ctx.drawImage(image, -span / 2, -span / 2, span, span);
       ctx.restore();
       return;
     }
@@ -1260,7 +1286,7 @@ function drawBlockSprite(ctx, world, tile, b, info, v) {
   } else if (info.rotate && b.rot) {
     ctx.rotate(-b.rot * Math.PI / 2);
   }
-  blit(base, frameOf(base, tile));
+  blit(base, tile);
 
   if (turret && turret.heat > 2) {
     // The barrel glows as it heats, which is the only sign a turret is firing when the
@@ -1290,10 +1316,9 @@ function drawBlockSprite(ctx, world, tile, b, info, v) {
   // The team plate. A team with its own painted version is drawn as it ships; anything
   // else falls back to the generic plate multiplied by the team colour, which is exactly
   // the choice the engine makes.
-  const painted = spriteOf(`${info.name}-team-${TEAM_NAME[b.team]}`);
+  const painted = imageFor(spriteOf(`${info.name}-team-${TEAM_NAME[b.team]}`));
   if (painted) {
-    ctx.drawImage(atlas, painted.x, painted.y, painted.w, painted.h,
-      -span / 2, -span / 2, span, span);
+    ctx.drawImage(painted, -span / 2, -span / 2, span, span);
   } else {
     const plate = tinted(info.name + "-team", teamColour(b.team));
     if (plate) ctx.drawImage(plate, -span / 2, -span / 2, span, span);
@@ -1318,6 +1343,8 @@ function drawCracks(ctx, tile, b, info, v) {
   const wear = 1 - b.hp / 100;
   const stage = sheet.frames[Math.max(0, Math.min(sheet.frames.length - 1,
     Math.floor(wear * sheet.frames.length)))];
+  const stageImage = imageOf(stage);
+  if (!stageImage) return;
   const span = size * v.cell;
   const offset = Math.floor((size - 1) / 2);
   const x = tile % v.world.width, y = Math.floor(tile / v.world.width);
@@ -1327,7 +1354,7 @@ function drawCracks(ctx, tile, b, info, v) {
   ctx.globalAlpha = 0.1 + wear * 0.6;
   ctx.translate(cx, cy);
   ctx.rotate((tile % 4) * Math.PI / 2);
-  const dark = tintedFrame(`cracks-${size}`, stage, "#333");
+  const dark = tintedImage(stage, stageImage, "#333");
   if (dark) ctx.drawImage(dark, -span / 2, -span / 2, span, span);
   ctx.restore();
 }
@@ -1418,13 +1445,12 @@ function drawBeltItems(ctx, world, v) {
 
     for (const [id, across, along] of belt.items) {
       const item = world.itemNames[String(id)];
-      const s = item && spriteOf("item-" + item.name);
+      const s = item && imageFor(spriteOf("item-" + item.name));
       if (!s) continue;
       // Along the belt, then half a tile back and sideways, as the engine composes it.
       const ox = ax * along - ax * 0.5 - ay * across * 0.5;
       const oy = ay * along - ay * 0.5 + ax * across * 0.5;
-      ctx.drawImage(atlas, s.x, s.y, s.w, s.h,
-        cx + ox * cell - size / 2, cy - oy * cell - size / 2, size, size);
+      ctx.drawImage(s, cx + ox * cell - size / 2, cy - oy * cell - size / 2, size, size);
     }
   }
 }
@@ -1578,10 +1604,10 @@ function drawCarried(ctx, world, unit, type, v) {
     ctx.drawImage(ring, px - size / 2, py - size / 2, size, size);
   }
 
-  const s = spriteOf("item-" + item.name);
+  const s = imageFor(spriteOf("item-" + item.name));
   if (s) {
     const size = ((type.item_size || 5 / 8) + sin / 8) * v.cell;
-    ctx.drawImage(atlas, s.x, s.y, s.w, s.h, px - size / 2, py - size / 2, size, size);
+    ctx.drawImage(s, px - size / 2, py - size / 2, size, size);
   }
 
   if (v.cell > 5) {
@@ -1605,10 +1631,11 @@ function drawUnits(ctx, world, v) {
     const cx = sx(x) + cell / 2, cy = sy(y) + cell / 2;
 
     const type = world.types[String(unit.type)] || {};
-    const s = spriteOf(type.name);
+    const entry = spriteOf(type.name);
+    const s = imageFor(entry);
     // The sprite at its true size: thirty-two pixels of art cover one tile. Floored so a
     // unit stays findable when the whole map is on screen.
-    const span = s ? Math.max(6, (s.w / 32) * cell) : Math.max(6, cell * 1.4);
+    const span = entry ? Math.max(6, (entry.w / 32) * cell) : Math.max(6, cell * 1.4);
     // Sprites point up, world rotation counts anticlockwise from east, and the canvas
     // counts y downwards, which is the whole of the quarter turn below.
     const angle = (90 - rot) * Math.PI / 180;
@@ -1629,7 +1656,7 @@ function drawUnits(ctx, world, v) {
       ctx.save();
       ctx.translate(cx, cy);
       ctx.rotate(angle);
-      ctx.drawImage(atlas, s.x, s.y, s.w, s.h, -span / 2, -span / 2, span, span);
+      ctx.drawImage(s, -span / 2, -span / 2, span, span);
       // The team cell, which is how a side is read in the game itself.
       const cellSprite = tinted(type.name + "-cell", teamColour(unit.team));
       if (cellSprite) ctx.drawImage(cellSprite, -span / 2, -span / 2, span, span);
@@ -1976,7 +2003,7 @@ let matches = [];
 
 async function refreshState() {
   try {
-    await loadAtlas();
+    await loadIndex();
     const state = await (await fetch("state", { cache: "no-store" })).json();
     const live = document.getElementById("s-live");
     live.className = "pill live";
@@ -2034,7 +2061,7 @@ function refreshScenes() {
 let lastCardDraw = 0;
 function frame(now) {
   requestAnimationFrame(frame);
-  if (!atlas && atlasIndex !== false) return;
+  if (!spriteIndex) return;
 
   if (detailIndex !== null) {
     const match = matches.find(m => m.index === detailIndex);

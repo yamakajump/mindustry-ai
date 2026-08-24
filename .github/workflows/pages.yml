@@ -11,6 +11,7 @@ on:
     paths:
       - "viewer/**"
       - "replays/showcase/**"
+      - "tools/extract_sprites.py"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -31,6 +32,19 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Extract the game sprites
+        # The site drew flat colours before this step existed: the viewer was published
+        # without the art it draws with, and nobody noticed because the fallback is
+        # deliberately quiet. They are extracted here rather than committed, because four
+        # thousand files that regenerate in twenty seconds do not belong in a repository.
+        run: |
+          python -m pip install --quiet pillow
+          python tools/extract_sprites.py --out site/assets
 
       - name: Assemble the site
         run: |

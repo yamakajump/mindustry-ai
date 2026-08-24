@@ -37,6 +37,7 @@ from gamma.cleanup import kill_servers
 from gamma.env import MindustryEnv
 from gamma.monitor import TrainingMonitor
 from gamma.replay import ReplayRecorder, _encode_bytes
+from tools.extract_sprites import ensure_assets
 from gamma.net import PolicyNet
 from gamma.ppo import PPO, PPOConfig, RolloutBuffer
 from gamma.window import DEFAULT_SIZE, LocalWindow
@@ -356,6 +357,9 @@ def main() -> None:
     kill_servers()
 
     ensure_jar()
+    # A dashboard of grey squares is a fresh clone missing its sprites, and there is no
+    # way to guess that from looking at it.
+    ensure_assets()
     monitor = TrainingMonitor(title=f"beta / {args.task}")
     url = monitor.serve(args.port)
     print(f"dashboard: {url}", flush=True)

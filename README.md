@@ -234,8 +234,13 @@ Ordered by dependency, not by excitement.
 
 ## Development
 
-Requires **Java 17** and **Python 3.13**. Nothing else: the Mindustry server is downloaded
-on demand, pinned to `v159.7`, and Gradle arrives through the wrapper.
+Requires **Java 17** and **Python 3.13**. Nothing else: the Mindustry server, the bridge
+plugin and the game sprites are all fetched or built on first run, pinned to `v159.7`, and
+Gradle arrives through the wrapper.
+
+The sprites are the whole game, about four thousand files extracted from the asset jar into
+`viewer/assets/sprites/` and fetched by a viewer the first time it draws one. They are not
+committed: they regenerate in twenty seconds with `python tools/extract_sprites.py`.
 
 ```bash
 python -m venv .venv

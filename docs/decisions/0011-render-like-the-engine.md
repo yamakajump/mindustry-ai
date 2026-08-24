@@ -79,8 +79,20 @@ use that is twenty-nine block types, floors, ores, props, static walls and build
 every one of them resolves to a sprite with its variants, its edge sheet, its large sheet
 and its overlays as applicable.
 
+Sprites cover the whole game rather than the subset in use, and are fetched one at a time
+as something first needs one. Packing them would mean a five-thousand-pixel atlas costing a
+hundred megabytes of memory to carry blocks no run will ever build; a match draws a few
+dozen, and a fresh dashboard settles at seventy-six loaded images out of fifteen hundred
+groups. The point is not the saving, it is that the day the agent unlocks a new tier
+nothing needs regenerating: the sprite is already there and loads the first time it is
+drawn. They are extracted from the asset jar by `tools/extract_sprites.py`, which the
+training entry point runs when they are missing, and they are not committed, because four
+thousand files that regenerate in twenty seconds are a build artifact.
+
 What is deliberately not reproduced: the legs of walking units, the barrel parts of a
-turret, the laser links between power nodes, the flame and glow drawers of the crafting
-blocks, and the item flow through a junction, which draws nothing in the game either. None
-of those appear in the curriculum as it stands. They are listed so the next person knows
-they were considered rather than missed.
+turret, the laser links between power nodes, and the flame and glow drawers of the crafting
+blocks, all of which need per-block state the bridge does not send yet. A block with no
+region of its own, a salvo say, falls back to the composed icon the game generates for it,
+which is the whole machine in one piece rather than nothing. Item flow through a junction
+is not drawn because the game does not draw it either. They are listed so the next person
+knows they were considered rather than missed.

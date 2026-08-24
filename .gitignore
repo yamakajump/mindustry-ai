@@ -67,3 +67,9 @@ Thumbs.db
 replay-mod/build/
 checkpoints/
 mindustry-beta/
+
+# ---------- Sprites du jeu ----------
+# Extraits de l'assets.jar de Mindustry par tools/extract_sprites.py. Quatre mille
+# fichiers regeneres en vingt secondes : un depot n'est pas l'endroit pour ca.
+viewer/assets/sprites/
+viewer/assets/index.json

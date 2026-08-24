@@ -121,7 +121,51 @@ const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d", { alpha: false });
 const stage = document.getElementById("stage");
 
-let replay = null, frames = [], planes = null, atlas = null, atlasIndex = null;
+let replay = null, frames = [], planes = null, spriteIndex = null;
+
+/** Loaded sprite images by file name. `null` while in flight, `false` once known missing. */
+const images = new Map();
+
+/**
+ * One sprite, fetched the first time something needs it.
+ *
+ * The whole game is on disk rather than packed into an atlas, so a replay of a copper mine
+ * never pays for the sprites of a thorium reactor.
+ */
+function imageOf(stem) {
+  const known = images.get(stem);
+  if (known !== undefined) return known || null;
+
+  images.set(stem, null);
+  const image = new Image();
+  // A sprite arrives after the frame that asked for it, and this viewer only redraws when
+  // something changes. Without this the first paint of a replay is the one that sticks,
+  // in flat colours, however many sprites land a moment later.
+  image.onload = () => { images.set(stem, image); redraw(); };
+  image.onerror = () => images.set(stem, false);
+  image.src = `assets/sprites/${encodeURIComponent(stem)}.png`;
+  return null;
+}
+
+/** Coalesce the redraws of a burst of sprites into one, on the next frame. */
+let redrawQueued = false;
+function redraw() {
+  if (redrawQueued) return;
+  redrawQueued = true;
+  requestAnimationFrame(() => { redrawQueued = false; draw(); });
+}
+
+/** A stable variant per tile, the way the engine picks one. */
+function frameOf(entry, tile) {
+  const frames = entry.frames;
+  if (!frames || !frames.length) return null;
+  if (frames.length < 2 || tile === undefined) return frames[0];
+  let n = (tile ^ 61) ^ (tile >>> 16);
+  n = (n + (n << 3)) | 0;
+  n = n ^ (n >>> 4);
+  n = Math.imul(n, 0x27d4eb2d);
+  return frames[((n ^ (n >>> 15)) >>> 0) % frames.length];
+}
 let position = 0, playing = false, lastTime = 0;
 let camera = { x: 0, y: 0, scale: 4, following: false };
 
@@ -133,16 +177,9 @@ async function inflate(b64) {
 }
 
 async function loadAtlas() {
-  if (atlas) return;
-  const meta = await fetch("assets/atlas.json").then(r => r.json());
-  const image = new Image();
-  await new Promise((resolve, reject) => {
-    image.onload = resolve;
-    image.onerror = () => reject(new Error("atlas.png missing"));
-    image.src = "assets/atlas.png";
-  });
-  atlas = image;
-  atlasIndex = meta.sprites;
+  if (spriteIndex) return;
+  const meta = await fetch("assets/index.json").then(r => r.json());
+  spriteIndex = meta.sprites;
 }
 
 async function load(buffer) {
@@ -192,7 +229,7 @@ async function load(buffer) {
 function spriteFor(id) {
   const entry = replay.palette[String(id)];
   if (!entry || entry.name === "air") return null;
-  return atlasIndex[entry.name] || null;
+  return spriteIndex[entry.name] || null;
 }
 
 function fit() {
@@ -228,20 +265,23 @@ function blit(sprite, tileX, tileY, tilesWide, rotation) {
   const px = tileX * TILE - (tilesWide - 1) * TILE / 2;
   const py = (replay.height - 1 - tileY) * TILE - (tilesWide - 1) * TILE / 2;
 
+  const image = imageOf(frameOf(sprite, tileY * replay.width + tileX));
+  if (!image) return;
+
   if (rotation) {
     ctx.save();
     ctx.translate(px + size / 2, py + size / 2);
     // Rotation 0 points right in game; sprites are drawn pointing right.
     ctx.rotate(-rotation * Math.PI / 2);
-    ctx.drawImage(atlas, sprite.x, sprite.y, sprite.w, sprite.h, -size / 2, -size / 2, size, size);
+    ctx.drawImage(image, -size / 2, -size / 2, size, size);
     ctx.restore();
   } else {
-    ctx.drawImage(atlas, sprite.x, sprite.y, sprite.w, sprite.h, px, py, size, size);
+    ctx.drawImage(image, px, py, size, size);
   }
 }
 
 function draw() {
-  if (!replay || !planes || !atlas) return;
+  if (!replay || !planes || !spriteIndex) return;
   const { width, height } = replay;
 
   ctx.fillStyle = "#05050a";
@@ -292,7 +332,7 @@ function draw() {
     for (const [key, act] of frame.built) {
       const x = key % width, y = Math.floor(key / width);
       if (x < minX || x > maxX || y < minY || y > maxY) continue;
-      const sprite = atlasIndex[act.b];
+      const sprite = spriteIndex[act.b];
       if (sprite) blit(sprite, x, y, sprite.tiles, act.r || 0);
     }
   }
