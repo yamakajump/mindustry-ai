@@ -191,7 +191,11 @@ def evaluate(bridge: Bridge, layout, origin: tuple[int, int],
 def render(candidate) -> str:
     """The layout as text, so a good one can be read rather than guessed at."""
     layout = candidate.to_layout() if hasattr(candidate, "to_layout") else candidate
-    glyphs = {"air": ".", "conveyor": "><^v", "mechanical-drill": "D",
+    # Indexed by Mindustry's own rotation: 0 right, 1 up, 2 left, 3 down. The obvious
+    # order to type is ">", "<", "^", "v" and it is wrong, so a column of conveyors
+    # carrying ore up into the core printed as a column pointing left, and the best design
+    # the search had found read as nonsense.
+    glyphs = {"air": ".", "conveyor": ">^<v", "mechanical-drill": "D",
               "junction": "+", "router": "o"}
     rows = []
     for y in range(layout.height - 1, -1, -1):
