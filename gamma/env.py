@@ -131,7 +131,10 @@ class MindustryEnv(gym.Env):
         self._server.wait_for(rf"listening on 127\.0\.0\.1:{self.bridge_port}", timeout=90)
         self._server.command(f"bridge-speed {self.speed}", r"speed set")
 
-        self._bridge = Bridge(port=self.bridge_port, tensor=True)
+        # Generous on purpose: a step on a developed base, on a machine sharing eight
+        # servers, can take far longer than the default. Timing out kills the
+        # environment, and losing one stalls the whole run.
+        self._bridge = Bridge(port=self.bridge_port, tensor=True, timeout=300.0)
         self._bridge.connect()
         return self._bridge
 

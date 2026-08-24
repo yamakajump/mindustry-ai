@@ -23,8 +23,10 @@ import numpy as np
 import torch
 
 from gamma import tasks
+from gamma.cleanup import kill_servers
 from gamma.env import MindustryEnv
 from gamma.monitor import TrainingMonitor
+from gamma.replay import _encode_bytes
 from gamma.net import PolicyNet
 from gamma.ppo import PPO, PPOConfig, RolloutBuffer
 from gamma.window import DEFAULT_SIZE, LocalWindow
@@ -55,6 +57,12 @@ class EnvWorker:
             task = replace(task, max_steps=self.args.max_steps)
 
         jar = str(next((Path("bridge") / "build" / "libs").glob("*.jar")))
+
+        # The watched environment runs at a speed a person can follow. Training speed is
+        # several hundred times realtime, which is unwatchable: a ten minute match goes by
+        # in a second. One slow environment costs a little throughput and is the only way
+        # to actually see what the agent is doing.
+        watched = self.index == self.args.watch
         env = MindustryEnv(
             task,
             server_dir=str(Path(self.args.root) / f"env{self.index}"),
@@ -62,8 +70,32 @@ class EnvWorker:
             game_port=GAME_PORT_BASE + self.index,
             jar=jar,
             embodied=self.args.embodied,
+            speed=str(self.args.watch_speed) if watched else "max",
         )
-        return LocalWindow(env, size=self.args.window), task
+        return LocalWindow(env, size=self.args.window, channels=self.args.channels), task
+
+    def _capture_terrain(self, env, state) -> None:
+        """Fetch the typed map once per episode so the dashboard can draw the real thing.
+
+        Costs one extra request per episode, against tens of kilobytes that would
+        otherwise have to ride along with every half-second poll.
+        """
+        try:
+            typed = env._bridge.map()
+        except Exception:
+            return
+
+        planes = typed["spatial"]
+        tiles = typed["width"] * typed["height"]
+        state.terrain = {
+            "width": typed["width"],
+            "height": typed["height"],
+            "palette": typed["palette"],
+            "floor": _encode_bytes(planes[0:tiles * 2]),
+            "overlay": _encode_bytes(planes[tiles * 2:tiles * 4]),
+            "block": _encode_bytes(planes[tiles * 4:tiles * 6]),
+        }
+        state.terrain_version += 1
 
     def _run(self) -> None:
         env = None
@@ -74,8 +106,11 @@ class EnvWorker:
             state.task = task.name
             state.objective = task.description
             state.max_steps = task.max_steps
+            state.game_port = GAME_PORT_BASE + self.index
+            state.watchable = self.index == self.args.watch
 
             observation, info = env.reset()
+            self._capture_terrain(env, state)
             episode_reward = 0.0
             episode_steps = 0
             self.results.put((observation, info))
@@ -109,6 +144,7 @@ class EnvWorker:
                 if done:
                     self.monitor.record_episode(self.index, episode_reward, task.succeeded(raw))
                     observation, info = env.reset()
+                    self._capture_terrain(env, state)
                     episode_reward = 0.0
                     episode_steps = 0
                     state.built = []
@@ -118,7 +154,15 @@ class EnvWorker:
             self.failed = error
             self.monitor.match(self.index).alive = False
             self.ready.set()
-            print(f"env {self.index} died: {error}")
+            print(f"env {self.index} died: {error!r}", flush=True)
+            # Unblock whoever is waiting on this worker. Without it the main loop waits
+            # for a reply that will never come, every other environment sits idle behind
+            # it, and the run looks frozen with the CPU nearly idle. Observed after ~3,500
+            # steps, with no error visible because stdout was still buffered.
+            try:
+                self.results.put_nowait(None)
+            except Exception:
+                pass
         finally:
             # Without this every run leaves its Mindustry servers alive: they hold their
             # ports, so the next run cannot bind them, and they quietly eat memory. An
@@ -157,11 +201,21 @@ def main() -> None:
     parser.add_argument("--task", default="T1_copper", choices=sorted(tasks.CURRICULUM))
     parser.add_argument("--embodied", action="store_true")
     parser.add_argument("--window", type=int, default=DEFAULT_SIZE)
+    parser.add_argument("--channels", type=int, default=14,
+                        help="observation channels, pinned so parallel envs agree")
     parser.add_argument("--max-steps", type=int, default=0)
     parser.add_argument("--port", type=int, default=8800)
+    parser.add_argument("--watch", type=int, default=0,
+                        help="index of the match to run at watchable speed, -1 for none")
+    parser.add_argument("--watch-speed", type=int, default=2,
+                        help="simulation speed for the watched match, 1 is realtime")
     parser.add_argument("--root", default="mindustry-beta")
     parser.add_argument("--out", type=Path, default=Path("checkpoints"))
     args = parser.parse_args()
+
+    # A killed run leaves its servers holding the ports, and the next one then
+    # fails with "no environment started" and no hint as to why.
+    kill_servers()
 
     monitor = TrainingMonitor(title=f"beta / {args.task}")
     print(f"dashboard: {monitor.serve(args.port)}")
@@ -175,7 +229,15 @@ def main() -> None:
     alive = [w for w in workers if w.failed is None]
     if not alive:
         raise SystemExit("no environment started")
-    print(f"{len(alive)} environments ready")
+    print(f"{len(alive)} environments ready", flush=True)
+    if args.watch >= 0:
+        print("", flush=True)
+        print("=" * 64, flush=True)
+        print(f"  WATCH IT LIVE IN THE REAL GAME", flush=True)
+        print(f"  Mindustry -> Play -> Join Game -> 127.0.0.1:{GAME_PORT_BASE + args.watch}", flush=True)
+        print(f"  (match #{args.watch}, running at {args.watch_speed}x so it is followable)", flush=True)
+        print("=" * 64, flush=True)
+        print("", flush=True)
 
     first = [w.results.get() for w in alive]
     observations = [obs for obs, _ in first]
@@ -235,20 +297,59 @@ def main() -> None:
             for key, value_array in masks.items():
                 buffer.masks[key][step] = torch.as_tensor(value_array, device=device)
 
+            previous_observations = list(observations)
+            previous_infos = list(infos)
             for worker, env_action in zip(alive, env_actions):
-                worker.requests.put(env_action)
+                try:
+                    worker.requests.put(env_action, timeout=30)
+                except queue.Full:
+                    print(f"env {worker.index} is not consuming actions")
 
             observations, infos, rewards, dones = [], [], [], []
-            for worker in alive:
-                obs, info, reward, done = worker.results.get()
+            casualties = []
+            for slot, worker in enumerate(alive):
+                try:
+                    result = worker.results.get(timeout=180)
+                except queue.Empty:
+                    result = None
+
+                if result is None:
+                    # Dead or hung: keep its last observation so the batch stays the right
+                    # shape for this step, and drop it before the next one.
+                    casualties.append(worker)
+                    observations.append(previous_observations[slot])
+                    infos.append(previous_infos[slot])
+                    rewards.append(0.0)
+                    dones.append(1.0)
+                    continue
+
+                obs, info, reward, done = result
                 observations.append(obs)
                 infos.append(info)
                 rewards.append(reward)
                 dones.append(float(done))
 
+            if casualties:
+                for worker in casualties:
+                    print(f"dropping env {worker.index}", flush=True)
+                    monitor.match(worker.index).alive = False
+                break
+
             buffer.rewards[step] = torch.as_tensor(rewards, device=device, dtype=torch.float32)
             buffer.dones[step] = torch.as_tensor(dones, device=device, dtype=torch.float32)
             total_steps += n_envs
+
+        if len(alive) != n_envs or any(w.failed for w in alive):
+            alive = [w for w in alive if w.failed is None]
+            if not alive:
+                print("every environment died, stopping")
+                break
+            print(f"continuing with {len(alive)} environments")
+            n_envs = len(alive)
+            first = []
+            for worker in alive:
+                worker.requests.put(None)
+            break
 
         with torch.no_grad():
             last_value = agent.net.value(
@@ -268,6 +369,7 @@ def main() -> None:
 
         lr = agent.set_learning_rate(total_steps / args.steps)
         stats = agent.update(buffer, last_value)
+        monitor.record_generation(agent.updates, stats)
 
         snapshot = monitor.snapshot()["totals"]
         elapsed = time.time() - started
@@ -276,7 +378,8 @@ def main() -> None:
             f"{total_steps / elapsed:6.1f}/s  lr {lr:.2e}  "
             f"policy {stats['policy_loss']:+.4f}  value {stats['value_loss']:.4f}  "
             f"entropy {stats['entropy']:.3f}  scale {stats['reward_scale']:.2f}  "
-            f"episodes {snapshot['episodes']}  solved {snapshot['solved']}"
+            f"episodes {snapshot['episodes']}  solved {snapshot['solved']}",
+            flush=True,
         )
 
         agent.save(args.out / "beta.pt")

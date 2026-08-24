@@ -54,10 +54,22 @@ class MatchState:
     finished: int = 0
     alive: bool = True
 
-    #: Tile coordinates of what the agent has built, for the mini map.
-    built: list[list[int]] = field(default_factory=list)
+    #: What the agent has built, as [x, y, block name], so the map can use real sprites.
+    built: list[Any] = field(default_factory=list)
     core: list[int] = field(default_factory=lambda: [-1, -1])
     size: list[int] = field(default_factory=lambda: [0, 0])
+
+    #: The map itself, sent once per episode: base64 planes plus the block palette. Large
+    #: enough that it is served on its own endpoint rather than in every poll.
+    terrain: dict[str, Any] | None = None
+    terrain_version: int = 0
+
+    #: Port a real Mindustry client can join to watch this match. The dashboard draws a
+    #: map; this is the only way to see the actual game, animations and all.
+    game_port: int = 0
+
+    #: True when this match runs at a speed a human can follow.
+    watchable: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -71,6 +83,8 @@ class MatchState:
             "episode": self.episode, "solved": self.solved,
             "finished": self.finished, "alive": self.alive,
             "built": self.built, "core": self.core, "size": self.size,
+            "terrain_version": self.terrain_version,
+            "game_port": self.game_port, "watchable": self.watchable,
         }
 
 
@@ -84,6 +98,10 @@ class TrainingMonitor:
         self._lock = threading.Lock()
         self._server: ThreadingHTTPServer | None = None
         self._history: list[dict[str, Any]] = []
+        #: One entry per training update, so progress can be read as a curve rather than
+        #: guessed from whichever episodes happen to be on screen.
+        self._generations: list[dict[str, Any]] = []
+        self._pending: list[float] = []
 
     # Collection ------------------------------------------------------------------
 
@@ -109,14 +127,45 @@ class TrainingMonitor:
                 "policy": state.policy,
                 "reward": round(reward, 3),
                 "solved": bool(solved),
+                "wave": state.wave,
             })
+            self._pending.append(reward)
             # Bounded on purpose: this is a live view, not a datastore.
             del self._history[:-500]
+
+    def record_generation(self, update: int, stats: dict[str, float]) -> None:
+        """Close a training update, summarising the episodes that fed it.
+
+        This is what makes progress legible. Individual episodes are noisy enough that a
+        good run and a lucky one look the same; the mean across an update does not.
+        """
+        with self._lock:
+            rewards = list(self._pending)
+            self._pending.clear()
+            best_wave = max((m.wave for m in self._matches.values()), default=0)
+
+            self._generations.append({
+                "update": update,
+                "at": round(time.time() - self.started, 1),
+                "episodes": len(rewards),
+                "mean_reward": round(sum(rewards) / len(rewards), 3) if rewards else None,
+                "best_reward": round(max(rewards), 3) if rewards else None,
+                "best_wave": best_wave,
+                "entropy": round(stats.get("entropy", 0.0), 3),
+                "value_loss": round(stats.get("value_loss", 0.0), 4),
+            })
+            del self._generations[:-400]
+
+    def terrain_of(self, index: int) -> dict[str, Any] | None:
+        with self._lock:
+            state = self._matches.get(index)
+            return state.terrain if state else None
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             matches = [m.as_dict() for m in sorted(self._matches.values(), key=lambda m: m.index)]
             history = list(self._history)
+            generations = list(self._generations)
 
         episodes = sum(m["finished"] for m in matches)
         solved = sum(m["solved"] for m in matches)
@@ -135,6 +184,7 @@ class TrainingMonitor:
             "elapsed": round(elapsed, 1),
             "matches": matches,
             "history": history,
+            "generations": generations,
             "leaderboard": leaderboard,
             "totals": {
                 "matches": len(matches),
@@ -142,6 +192,9 @@ class TrainingMonitor:
                 "solved": solved,
                 "solve_rate": round(solved / episodes, 3) if episodes else 0.0,
                 "steps_per_second": round(steps / elapsed, 1),
+                "updates": len(generations),
+                "best_wave": max((m["wave"] for m in matches), default=0),
+                "best_reward": round(max((m["best_reward"] for m in matches), default=0.0), 2),
             },
         }
 
@@ -153,6 +206,27 @@ class TrainingMonitor:
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self) -> None:  # noqa: N802
+                if self.path.startswith("/terrain"):
+                    # Served separately: a 256x256 typed map is tens of kilobytes, and
+                    # putting it in every half-second poll would swamp the connection.
+                    try:
+                        index = int(self.path.rsplit("/", 1)[-1])
+                    except ValueError:
+                        self.send_error(400)
+                        return
+                    terrain = monitor.terrain_of(index)
+                    if terrain is None:
+                        self.send_error(404)
+                        return
+                    body = json.dumps(terrain).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+
                 if self.path.startswith("/state"):
                     body = json.dumps(monitor.snapshot()).encode("utf-8")
                     self.send_response(200)
@@ -181,10 +255,21 @@ class TrainingMonitor:
                 # Silent: request logs would drown the training output.
                 pass
 
-        self._server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+        # A dashboard from a previous run may still hold the port. Failing loudly here
+        # beats binding nothing and leaving the caller pointed at stale data from a run
+        # that ended minutes ago.
+        for candidate in range(port, port + 20):
+            try:
+                self._server = ThreadingHTTPServer(("127.0.0.1", candidate), Handler)
+                break
+            except OSError:
+                continue
+        else:
+            raise OSError(f"no free port between {port} and {port + 19}")
+
         thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         thread.start()
-        return f"http://127.0.0.1:{port}/"
+        return f"http://127.0.0.1:{self._server.server_address[1]}/"
 
     def stop(self) -> None:
         if self._server is not None:

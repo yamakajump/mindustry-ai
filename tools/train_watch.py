@@ -19,6 +19,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from gamma import tasks
+from gamma.cleanup import kill_servers
 from gamma.alpha import AlphaPolicy
 from gamma.alpha_embodied import EmbodiedAlphaPolicy
 from gamma.env import MindustryEnv
@@ -140,6 +141,10 @@ def main() -> None:
     parser.add_argument("--root", default="mindustry-train")
     parser.add_argument("--no-open", action="store_true")
     args = parser.parse_args()
+
+    # A killed run leaves its servers holding the ports, and the next one then
+    # fails with "no environment started" and no hint as to why.
+    kill_servers()
 
     monitor = TrainingMonitor(title=f"{args.task}{' (embodied)' if args.embodied else ''}")
     url = monitor.serve(args.port)

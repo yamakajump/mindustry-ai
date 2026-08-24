@@ -28,11 +28,15 @@ DEFAULT_SIZE = 48
 class LocalWindow:
     """Wraps an environment so observations and actions are local to the agent."""
 
-    def __init__(self, env, size: int = DEFAULT_SIZE) -> None:
+    def __init__(self, env, size: int = DEFAULT_SIZE, channels: int | None = None) -> None:
         self.env = env
         self.size = size
         self._origin = (0, 0)
         self._last_raw: dict[str, Any] = {}
+        #: Pinned by the caller when several environments must agree, otherwise taken
+        #: from the first observation. Left to each wrapper alone, parallel
+        #: environments can settle on different counts and never reconcile.
+        self._channels: int | None = channels
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.env, name)
@@ -83,6 +87,18 @@ class LocalWindow:
             padded = np.zeros((spatial.shape[0], self.size, self.size), dtype=np.uint8)
             padded[:, :spatial.shape[1], :spatial.shape[2]] = spatial
             spatial = padded
+
+        # Channel count can change between episodes: the encoder allocates one channel per
+        # ore type present on the loaded map. Parallel environments then disagree, and
+        # stacking their observations fails with nothing but "all input arrays must have
+        # the same shape" to go on. Pinning it keeps the batch rectangular.
+        if self._channels is None:
+            self._channels = spatial.shape[0]
+        elif spatial.shape[0] != self._channels:
+            fixed = np.zeros((self._channels, self.size, self.size), dtype=np.uint8)
+            keep = min(self._channels, spatial.shape[0])
+            fixed[:keep] = spatial[:keep]
+            spatial = fixed
 
         return {"spatial": np.ascontiguousarray(spatial), "global": observation["global"]}
 
