@@ -279,7 +279,9 @@ class EnvWorker:
                 done = terminated or truncated
                 if done:
                     solved = task.succeeded(raw)
-                    self.monitor.record_episode(self.index, episode_reward, solved)
+                    self.monitor.record_episode(
+                        self.index, episode_reward, solved, state.reached
+                    )
                     self._archive_episode(state, episode_reward, solved)
                     observation, info = env.reset()
                     state.scene.clear()
@@ -425,7 +427,7 @@ def main() -> None:
     parser.add_argument("--watch-speed", type=int, default=2,
                         help="simulation speed for the watched match, 1 is realtime")
     parser.add_argument("--record", action="store_true", default=True,
-                        help="record replays of the watched match")
+                        help="archive each match's best episodes")
     parser.add_argument("--no-record", dest="record", action="store_false")
     parser.add_argument("--replays", default="replays/live")
     parser.add_argument("--open", action="store_true", default=True,
@@ -435,6 +437,10 @@ def main() -> None:
                         help="animation frames collected per second and per match")
     parser.add_argument("--root", default="mindustry-beta")
     parser.add_argument("--out", type=Path, default=Path("checkpoints"))
+    parser.add_argument("--resume", action="store_true", default=True,
+                        help="continue from checkpoints/beta.pt when it exists")
+    parser.add_argument("--fresh", dest="resume", action="store_false",
+                        help="start from a new policy, ignoring any checkpoint")
     parser.add_argument("--save-every", type=int, default=10,
                         help="keep a numbered checkpoint every N generations, 0 to disable")
     args = parser.parse_args()
@@ -504,6 +510,16 @@ def main() -> None:
         n_blocks=len(infos[0]["action_mask"]["block"]),
     )
     agent = PPO(net, config)
+
+    # `beta.pt` was documented as the file a run resumes from, and nothing ever loaded it.
+    # Stopping a run to look at a replay therefore threw away every generation it had, so
+    # it is loaded by default when it is there, and `--fresh` is how you say you meant to
+    # start over.
+    start = args.out / "beta.pt"
+    if args.resume and start.exists():
+        agent.load(start)
+        print(f"resuming from {start} at generation {agent.updates}")
+
     print(f"policy on {config.device}, {sum(p.numel() for p in net.parameters()):,} parameters")
 
     if showcase is not None:
@@ -520,7 +536,17 @@ def main() -> None:
     #: takes a few updates on a task where an episode spans hundreds of steps.
     best_mean: float | None = None
 
-    while total_steps < args.steps:
+    while total_steps < args.steps and not monitor.stopping.is_set():
+        # Checked between updates rather than between steps. A rollout half collected is
+        # not a rollout, and the environments are frozen the moment nobody asks them for a
+        # step, so the pause lands within a couple of seconds either way.
+        if not monitor.running.is_set():
+            print("paused; resume from the dashboard", flush=True)
+            monitor.running.wait()
+            if monitor.stopping.is_set():
+                break
+            print("resumed", flush=True)
+
         buffer = RolloutBuffer(
             spatial=torch.zeros((steps, n_envs, *sample["spatial"].shape), dtype=torch.uint8, device=device),
             globals_=torch.zeros((steps, n_envs, sample["global"].shape[0]), device=device),
@@ -641,6 +667,12 @@ def main() -> None:
         )
 
 
+
+    # Saved on the way out whatever ended the run: a budget reached, a stop from the
+    # dashboard, or the last environment dying. Losing an hour of training because the
+    # exit went through a different branch is not a failure mode worth keeping.
+    agent.save(args.out / "beta.pt")
+    print(f"saved generation {agent.updates} to {args.out / 'beta.pt'}", flush=True)
 
     for worker in workers:
         worker.stop.set()

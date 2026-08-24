@@ -263,3 +263,62 @@ def test_the_best_recording_is_found_across_every_match(tmp_path) -> None:
     assert ranked[0][1].name == "ep000004-pos039213.jsonl.gz"
     # A recording still being written has no score and must not be offered.
     assert scored(Path("ep000009.pending.jsonl.gz")) is None
+
+
+def test_a_run_can_be_paused_and_resumed_without_being_killed() -> None:
+    """Before this, looking at a replay meant killing the process, and killing the process
+    threw away every generation since the last save."""
+    from gamma.monitor import TrainingMonitor
+
+    monitor = TrainingMonitor()
+    assert monitor.running.is_set() and not monitor.stopping.is_set()
+
+    monitor.control("pause")
+    assert not monitor.running.is_set()
+    assert monitor.snapshot()["paused"] is True
+
+    monitor.control("resume")
+    assert monitor.running.is_set()
+    assert monitor.snapshot()["paused"] is False
+
+
+def test_stopping_releases_a_paused_run() -> None:
+    """A run asked to stop while paused has to reach the exit, not sit on the pause it was
+    told to leave."""
+    from gamma.monitor import TrainingMonitor
+
+    monitor = TrainingMonitor()
+    monitor.control("pause")
+    monitor.control("stop")
+
+    assert monitor.stopping.is_set()
+    assert monitor.running.is_set(), "a stopped run must not stay blocked on its pause"
+
+
+def test_a_generation_records_how_often_each_rung_was_reached() -> None:
+    """A mean reward that rose because one episode got lucky looks identical to a policy
+    that got better. The share of episodes that automated production does not."""
+    from gamma.monitor import TrainingMonitor
+
+    monitor = TrainingMonitor()
+    for index in range(4):
+        monitor.match(index).policy = "beta"
+    monitor.record_episode(0, 250.0, False, ["first_drill", "automation"])
+    monitor.record_episode(1, -40.0, False, ["first_drill"])
+    monitor.record_episode(2, -38.0, False, [])
+    monitor.record_episode(3, -41.0, False, ["first_drill"])
+
+    generation = monitor.record_generation(12, {"entropy": 11.7})
+    assert generation["episodes"] == 4
+    assert generation["rungs"]["automation"] == 0.25
+    assert generation["rungs"]["first_drill"] == 0.75
+    assert "wave_10" not in generation["rungs"]
+
+
+def test_the_dashboard_offers_the_controls_in_both_languages() -> None:
+    page = (Path(__file__).resolve().parents[1] / "viewer" / "dashboard.html").read_text(
+        encoding="utf-8"
+    )
+    for key in ("pause:", "resume:", "stop:", "stopConfirm:", "automationRate:"):
+        assert page.count(key) == 2, key
+    assert 'id="pause"' in page and 'id="stop"' in page

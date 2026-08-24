@@ -117,6 +117,14 @@
   }
   .join button:hover { background: rgba(121,221,154,.3); }
   .join b { color: var(--text); font-family: ui-monospace, monospace; }
+  .ghost.danger { color: var(--bad); border-color: rgba(233,116,116,.45); }
+  .ghost.danger:hover { background: rgba(233,116,116,.14); }
+  .ghost[disabled] { opacity: .4; cursor: default; }
+  /* The rate at which a generation reached a rung. The number that says whether a version
+     is actually better, rather than luckier. */
+  .rate { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--muted); }
+  .rate i { display: block; height: 4px; border-radius: 2px; background: var(--good); min-width: 1px; }
+  .rate-track { flex: 1; background: var(--raised); border-radius: 2px; overflow: hidden; }
   .items { display: flex; flex-wrap: wrap; gap: var(--s1); }
   .item { background: var(--raised); border: 1px solid var(--line); border-radius: 5px; padding: 1px 7px; font-size: 12px; }
   .item b { color: var(--ore); font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -212,6 +220,8 @@
   <div class="stat"><b id="s-sps" class="num">0</b><span data-i18n="stepsPerSecond">steps/s</span></div>
   <div class="stat"><b id="s-elapsed" class="num">0s</b><span data-i18n="elapsed">elapsed</span></div>
   <div class="right">
+    <button id="pause" class="ghost" type="button" data-i18n="pause">pause</button>
+    <button id="stop" class="ghost danger" type="button" data-i18n="stop">stop &amp; save</button>
     <button id="lang" class="ghost" aria-label="Switch language">FR</button>
     <span class="pill" id="s-live"><span class="dot"></span><span data-i18n="connecting">connecting</span></span>
   </div>
@@ -322,7 +332,9 @@ const STRINGS = {
     gen:"gen", mean:"mean", episodesShort:"eps", waves:"waves", copy:"copy", copied:"copied!",
     follow:"follow the bot", cameraHint:"drag to move, wheel to zoom, F to follow",
     needGenerations:"first episodes still running...",
-    automated:"delivered by machine",
+    automated:"delivered by machine", automationRate:"share of this generation's episodes that automated production",
+    pause:"pause", resume:"resume", stop:"stop & save",
+    stopConfirm:"Stop the run? The checkpoint is written first, and the next run picks up from it.",
     // The ladder, in plain words. Each one lights up the first time a match reaches it.
     rung_first_drill:"first drill", rung_first_conveyor:"first conveyor",
     rung_first_wall:"first wall", rung_first_turret:"first turret",
@@ -356,7 +368,9 @@ const STRINGS = {
     gen:"gén", mean:"moy", episodesShort:"éps", waves:"vagues", copy:"copier", copied:"copié !",
     follow:"suivre le bot", cameraHint:"glisser pour déplacer, molette pour zoomer, F pour suivre",
     needGenerations:"premiers épisodes en cours...",
-    automated:"livré par machine",
+    automated:"livré par machine", automationRate:"part des épisodes de cette génération qui ont automatisé la production",
+    pause:"pause", resume:"reprendre", stop:"arrêter et sauver",
+    stopConfirm:"Arrêter le run ? La sauvegarde est écrite d'abord, et le prochain run repart de là.",
     rung_first_drill:"première foreuse", rung_first_conveyor:"premier convoyeur",
     rung_first_wall:"premier mur", rung_first_turret:"première tourelle",
     rung_automation:"une machine a livré du minerai", rung_automation_100:"100 livrés",
@@ -2159,6 +2173,41 @@ function updateDetail(match) {
 }
 
 // Panels -----------------------------------------------------------------------
+// Control ----------------------------------------------------------------------
+let paused = false;
+
+async function control(action) {
+  try {
+    const reply = await fetch("control/" + action, { method: "GET" });
+    const state = await reply.json();
+    paused = state.paused;
+  } catch (error) {
+    // The run may be on its way down, which is exactly when this call fails.
+  }
+}
+
+function bindControls() {
+  const pause = document.getElementById("pause");
+  const stop = document.getElementById("stop");
+  pause.onclick = () => control(paused ? "resume" : "pause");
+  stop.onclick = () => {
+    // Stopping is not killing: the loop saves its checkpoint on the way out and the next
+    // run picks up where this one left off. Worth saying, because the button reads
+    // final.
+    if (!confirm(t("stopConfirm"))) return;
+    stop.disabled = true;
+    control("stop");
+  };
+}
+
+function renderControls(state) {
+  paused = !!state.paused;
+  const pause = document.getElementById("pause");
+  pause.textContent = paused ? t("resume") : t("pause");
+  pause.classList.toggle("danger", paused);
+  document.getElementById("stop").disabled = !!state.stopping;
+}
+
 function renderVersions(generations) {
   const host = document.getElementById("s-versions");
   const saved = generations.filter(g => g.checkpoint);
@@ -2166,14 +2215,24 @@ function renderVersions(generations) {
     host.innerHTML = `<div class="empty">${t("noVersions")}</div>`;
     return;
   }
-  const rows = saved.slice(-8).reverse().map(g => `
+  const rows = saved.slice(-8).reverse().map(g => {
+    // Not the mean alone. A version whose mean rose because one episode got lucky looks
+    // identical to one that got better; the share of episodes that automated production
+    // does not.
+    const rate = (g.rungs || {}).automation || 0;
+    return `
     <tr>
       <td>${t("gen")} <b class="${g.best ? "best" : ""}">${g.update}</b>${g.best ? `<span class="tag-best">best</span>` : ""}</td>
       <td>${g.episodes} ${t("episodesShort")}</td>
       <td class="${g.mean_reward > 0 ? "best" : ""}">${g.mean_reward === null ? "-" : g.mean_reward.toFixed(2)}</td>
-    </tr>`).join("");
+      <td><div class="rate" title="${t("automationRate")}">
+        <span class="rate-track"><i style="width:${(rate * 100).toFixed(0)}%"></i></span>${(rate * 100).toFixed(0)}%
+      </div></td>
+    </tr>`;
+  }).join("");
   host.innerHTML = `<table class="gens">
-    <tr><th>${t("versions")}</th><th>${t("episodesShort")}</th><th>${t("mean")}</th></tr>${rows}</table>`;
+    <tr><th>${t("versions")}</th><th>${t("episodesShort")}</th><th>${t("mean")}</th>
+        <th>${t("automated")}</th></tr>${rows}</table>`;
 }
 
 function renderReplays(matches) {
@@ -2313,6 +2372,7 @@ async function refreshState() {
     }
     if (!state.leaderboard.length) board.innerHTML = `<li class="empty">${t("noResults")}</li>`;
 
+    renderControls(state);
     drawLearning(state.generations || []);
     renderVersions(state.generations || []);
     renderReplays(matches);
@@ -2359,6 +2419,7 @@ function frame(now) {
 }
 
 applyLanguage();
+bindControls();
 refreshState();
 setInterval(refreshState, 700);
 setInterval(refreshScenes, 180);

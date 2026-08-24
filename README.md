@@ -174,6 +174,15 @@ Useful flags: `--envs N`, `--worlds N` to narrow the training pool without touch
 held-out half, `--direct` to drop the body and train faster, `--no-watch` to drop the
 showcase match, `--no-record` to skip replays.
 
+The dashboard drives the run: **pause** to look at something without losing the machine,
+**stop & save** to bring it down cleanly. Stopping is not killing. The checkpoint is
+written on the way out and the next run picks up from it, which is what `--fresh` is for
+when you actually meant to start over.
+
+Each saved version is listed with the share of its episodes that reached each rung, not
+just its mean reward. A mean that rose because one episode got lucky looks identical to a
+policy that got better; a rate does not.
+
 Every match archives its best five episodes, its latest three, and every episode that
 solved. To watch the best one of a run inside the real game:
 

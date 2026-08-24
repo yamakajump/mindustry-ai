@@ -318,6 +318,17 @@ class TrainingMonitor:
         self.started = time.time()
         self._matches: dict[int, MatchState] = {}
         self._lock = threading.Lock()
+
+        #: Set while the run should keep going. Cleared to hold it between updates.
+        #:
+        #: Pausing is nearly free because the bridge already pauses each world between
+        #: steps: a trainer that stops asking for steps is a set of frozen games, not a
+        #: set of games running with nobody watching.
+        self.running = threading.Event()
+        self.running.set()
+
+        #: Set to bring the run down cleanly, saving what it has rather than losing it.
+        self.stopping = threading.Event()
         self._server: ThreadingHTTPServer | None = None
         self._history: list[dict[str, Any]] = []
         #: One entry per training update, so progress can be read as a curve rather than
@@ -336,7 +347,8 @@ class TrainingMonitor:
                 self._matches[index] = MatchState(index=index)
             return self._matches[index]
 
-    def record_episode(self, index: int, reward: float, solved: bool) -> None:
+    def record_episode(self, index: int, reward: float, solved: bool,
+                       reached: list[str] | None = None) -> None:
         """Close out an episode, keeping just enough history for a trend line."""
         with self._lock:
             state = self._matches.get(index)
@@ -354,7 +366,9 @@ class TrainingMonitor:
                 "solved": bool(solved),
                 "wave": state.wave,
             })
-            self._pending.append(reward)
+            # The rungs go in alongside the reward: "a third of the episodes automated
+            # production" is a statement about a generation, and a mean reward is not.
+            self._pending.append((reward, tuple(reached or ())))
             # Bounded on purpose: this is a live view, not a datastore.
             del self._history[:-500]
 
@@ -365,9 +379,20 @@ class TrainingMonitor:
         good run and a lucky one look the same; the mean across an update does not.
         """
         with self._lock:
-            rewards = list(self._pending)
+            episodes = list(self._pending)
             self._pending.clear()
+            rewards = [reward for reward, _ in episodes]
             best_wave = max((m.wave for m in self._matches.values()), default=0)
+
+            # What fraction of this generation's episodes reached each rung. This is the
+            # number that separates learning from luck: with two dozen matches placing
+            # blocks half at random, something eventually stumbles onto anything, and only
+            # the rate of it says whether the policy is getting better at it.
+            rungs: dict[str, float] = {}
+            if episodes:
+                for name in {rung for _, reached in episodes for rung in reached}:
+                    hits = sum(name in reached for _, reached in episodes)
+                    rungs[name] = round(hits / len(episodes), 3)
 
             generation = {
                 "update": update,
@@ -378,6 +403,7 @@ class TrainingMonitor:
                 "best_wave": best_wave,
                 "entropy": round(stats.get("entropy", 0.0), 3),
                 "value_loss": round(stats.get("value_loss", 0.0), 4),
+                "rungs": rungs,
                 #: Set once the weights behind this generation are written to disk, so a
                 #: point on the curve can be pointed at a file rather than admired.
                 "checkpoint": None,
@@ -386,6 +412,24 @@ class TrainingMonitor:
             self._generations.append(generation)
             del self._generations[:-400]
             return generation
+
+    def control(self, action: str) -> None:
+        """Pause, resume or stop the run from the dashboard.
+
+        Stopping is not killing: the loop notices, saves its checkpoint and shuts the
+        environments down, so the run can be picked up again from where it was. Before
+        this existed the only way to look at a replay was to kill the process, and killing
+        the process threw away every generation since the last save.
+        """
+        if action == "pause":
+            self.running.clear()
+        elif action == "resume":
+            self.running.set()
+        elif action == "stop":
+            self.stopping.set()
+            # Released so a paused run can actually reach the exit rather than sitting on
+            # the pause it was asked to leave.
+            self.running.set()
 
     def register_replays(self, index: int, archive: Any) -> None:
         with self._lock:
@@ -439,6 +483,8 @@ class TrainingMonitor:
             "history": history,
             "generations": generations,
             "leaderboard": leaderboard,
+            "paused": not self.running.is_set(),
+            "stopping": self.stopping.is_set(),
             "totals": {
                 "matches": len(matches),
                 "episodes": episodes,
@@ -524,6 +570,17 @@ class TrainingMonitor:
 
                 if self.path.startswith("/state"):
                     self._json(monitor.snapshot())
+                    return
+
+                if self.path.startswith("/control/"):
+                    action = self.path[len("/control/"):].split("?")[0]
+                    if action not in ("pause", "resume", "stop"):
+                        self.send_error(404)
+                        return
+                    monitor.control(action)
+                    self._json({"ok": True, "action": action,
+                                "paused": not monitor.running.is_set(),
+                                "stopping": monitor.stopping.is_set()})
                     return
 
                 name = "dashboard.html" if self.path in ("/", "") else self.path.lstrip("/")
