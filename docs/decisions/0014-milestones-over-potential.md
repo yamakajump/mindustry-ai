@@ -132,6 +132,42 @@ generated worlds before ever proving the agent learns on one was the wrong order
 `--worlds N` narrows the training pool without touching the held-out half, so the
 measurement stays honest while the basics are in doubt.
 
+## What it measured
+
+First held-out score, at generation 143 and 170,000 steps, twelve episodes each on worlds
+never trained on:
+
+| policy | reward | produced | solved | first drill |
+|---|---|---|---|---|
+| `beta-best` | **-9.52** +-31.5 | 0.0 | 0/12 | 42% |
+| masked random | **-9.25** +-35.2 | 0.0 | 0/12 | 75% |
+
+**No learning.** The checkpoint does not clear the random floor, reaches fewer rungs than
+random does, and neither policy delivered a single ore by machine on a world it had not
+seen. That is the number this project reports, and it says no.
+
+What did move is the thing the ladder was built to move. In training, a generation whose
+episodes automated production averages about **+110** and one whose episodes did not
+averages about **-35**, cleanly separated with no overlap over the window measured. The
+potential-based version produced no such separation, because the event it was meant to
+reward was worth almost nothing when it happened. So the signal is there and the policy is
+not following it yet.
+
+Two things this exposed, both fixed:
+
+- **The watchable match was inside the training batch.** Rollout collection is lockstep,
+  so the slowest environment paced the rest, and one match at 2x cost the run a factor of
+  eight in throughput: 46 steps/s against 377 once it was moved out.
+- **`beta-best.pt` was picked on one lucky episode.** A generation closes two to eight
+  episodes here, and the gap between automating and not is a hundred and fifty points, so
+  a generation's own mean is mostly noise. The checkpoint evaluated above was, literally,
+  the luckiest generation. Promotion now requires the mean over thirty finished episodes.
+
+170,000 steps is three per cent of the budget, and Procgen needs tens of millions before
+generalisation appears, so "not yet" is the expected reading rather than a verdict. It is
+recorded here because a decision document that states only its intent is worth half of
+one.
+
 If the ladder turns out to be climbable and the agent still stalls above it, the next
 lever is intrinsic motivation rather than a longer ladder.
 [RND](https://arxiv.org/abs/1810.12894) rewards novelty of observation and is the standard
