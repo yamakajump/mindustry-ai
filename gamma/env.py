@@ -191,6 +191,22 @@ class MindustryEnv(gym.Env):
             self._build_spaces(raw)
             self._last_obs = raw
 
+    def set_speed(self, speed: str) -> None:
+        """Change the simulation speed of a running server.
+
+        Uncapped speed means the engine's frame budget is zero, so its loop never sleeps.
+        That is what makes a step fast, and it also means a server with nothing to do
+        spins a core doing nothing at all. Twenty-four of them held the machine at 99%
+        through a pause that was supposed to free it. Dropping to realtime hands the
+        cores back; the pause raises it again on the way out.
+
+        Safe to call from another thread only while the owning one is not stepping: the
+        console channel is separate from the bridge socket, but neither is reentrant.
+        """
+        self.speed = speed
+        if self._server is not None:
+            self._server.command(f"bridge-speed {speed}", r"speed set", timeout=15.0)
+
     def _load(self, bridge: Bridge) -> dict[str, Any]:
         """Start a match: a generated sector, a named preset, or a custom map."""
         if self.task.procedural:

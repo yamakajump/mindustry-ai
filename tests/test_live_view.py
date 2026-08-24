@@ -322,3 +322,50 @@ def test_the_dashboard_offers_the_controls_in_both_languages() -> None:
     for key in ("pause:", "resume:", "stop:", "stopConfirm:", "automationRate:"):
         assert page.count(key) == 2, key
     assert 'id="pause"' in page and 'id="stop"' in page
+
+
+def test_a_pause_hands_the_machine_back() -> None:
+    """A pause that leaves twenty-four servers spinning at 99% is not a pause. At uncapped
+    speed the engine's frame budget is zero and its loop never sleeps, so a server with
+    nothing to do still burns a core."""
+    from types import SimpleNamespace
+
+    from tools.train_beta import idle_speed
+
+    calls = []
+
+    def worker(index, showcase):
+        env = SimpleNamespace(set_speed=lambda s: calls.append((index, s)))
+        return SimpleNamespace(index=index, env=env, showcase=showcase,
+                               args=SimpleNamespace(watch_speed=2))
+
+    workers = [worker(0, False), worker(1, False), worker(2, True)]
+
+    idle_speed(workers, "1")
+    assert calls == [(0, "1"), (1, "1"), (2, "1")]
+
+    calls.clear()
+    idle_speed(workers, None)
+    # Each goes back to what it was started at, not to a single shared value: the showcase
+    # is watchable and the rest are uncapped.
+    assert calls == [(0, "max"), (1, "max"), (2, "2")]
+
+
+def test_a_server_that_refuses_to_slow_down_does_not_take_the_run_with_it() -> None:
+    """Giving up a pause is not worth losing an hour of training over."""
+    from types import SimpleNamespace
+
+    from tools.train_beta import idle_speed
+
+    def explode(_):
+        raise RuntimeError("server not answering")
+
+    workers = [
+        SimpleNamespace(index=0, env=SimpleNamespace(set_speed=explode), showcase=False,
+                        args=SimpleNamespace(watch_speed=2)),
+        # Not yet built, which is the state a worker is in while it starts up.
+        SimpleNamespace(index=1, env=None, showcase=False,
+                        args=SimpleNamespace(watch_speed=2)),
+    ]
+
+    idle_speed(workers, "1")

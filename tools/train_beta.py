@@ -46,6 +46,27 @@ BRIDGE_PORT_BASE = 7920
 GAME_PORT_BASE = 6920
 
 
+def idle_speed(workers, speed: str | None) -> None:
+    """Slow every server down, or put each back to the speed it was started at.
+
+    Called from the main thread while every worker is parked on its request queue, which
+    is the only moment where touching another thread's server is safe. A failure here is
+    logged rather than raised: giving up a pause is not worth losing a run over.
+    """
+    for worker in workers:
+        env = worker.env
+        if env is None:
+            continue
+        target = speed if speed is not None else (
+            str(worker.args.watch_speed) if worker.showcase else "max"
+        )
+        try:
+            env.set_speed(target)
+        except Exception as error:  # noqa: BLE001
+            print(f"env {worker.index}: could not set speed to {target}: {error!r}",
+                  flush=True)
+
+
 def showcase_policy(net: PolicyNet, window: int, device: str):
     """Play the current policy, for the one match a person is watching.
 
@@ -94,6 +115,7 @@ class EnvWorker:
         #: Set by the trainer once the network exists. Until then the showcase idles.
         self.act = None
         self.stop = threading.Event()
+        self.env = None
         #: Wall-clock spacing between animation frames. At training speed a step takes a
         #: couple of milliseconds, so fetching a frame per step would produce hundreds a
         #: second for a browser that can draw ten. The simulation is what should run flat
@@ -157,6 +179,9 @@ class EnvWorker:
             self.monitor.register_replays(self.index, self.archive)
             inner = self.recorder
 
+        # Kept so the run can hand the machine back while it is paused. The wrapper is
+        # what the trainer steps; the speed lives on the environment underneath it.
+        self.env = env
         return LocalWindow(inner, size=self.args.window, channels=self.args.channels), task
 
     def _archive_episode(self, state, reward: float, solved: bool) -> None:
@@ -541,8 +566,15 @@ def main() -> None:
         # not a rollout, and the environments are frozen the moment nobody asks them for a
         # step, so the pause lands within a couple of seconds either way.
         if not monitor.running.is_set():
+            # Handed back rather than merely idled. At uncapped speed the engine's frame
+            # budget is zero and its loop never sleeps, so twenty-four servers with
+            # nothing to do held the machine at 99% through a pause whose whole purpose
+            # was to free it. Realtime gives it back; a paused world costs nothing to
+            # simulate anyway.
+            idle_speed(workers, "1")
             print("paused; resume from the dashboard", flush=True)
             monitor.running.wait()
+            idle_speed(workers, None)
             if monitor.stopping.is_set():
                 break
             print("resumed", flush=True)
