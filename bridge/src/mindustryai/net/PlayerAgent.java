@@ -1,0 +1,234 @@
+package mindustryai.net;
+
+import arc.math.geom.Vec2;
+import arc.util.Log;
+import mindustry.Vars;
+import mindustry.content.Blocks;
+import mindustry.entities.units.AIController;
+import mindustry.entities.units.BuildPlan;
+import mindustry.gen.Unit;
+import mindustry.type.Item;
+import mindustry.world.Block;
+import mindustry.world.Tile;
+import mindustry.world.blocks.storage.CoreBlock;
+
+/**
+ * The agent embodied as a player, not as a god.
+ *
+ * <p>Until now the bridge edited the world directly: a block appeared instantly, anywhere
+ * on the map, for the price of its materials. A human cannot do that. They inhabit a core
+ * unit, they have to fly to what they want to build, construction takes time, and mining
+ * means holding position over an ore patch until the unit fills up.
+ *
+ * <p>This controller gives the agent exactly the affordances of a player and nothing more.
+ * Every limit here is the engine's own: {@code type.buildRange} decides how far it can
+ * reach, {@code type.mineTier} decides which ores it can touch, and the build queue is the
+ * same one the game processes for a human. None of it is reimplemented, so none of it can
+ * drift from the real rules.
+ *
+ * <p>The agent expresses intent, not outcome: "go there", "mine that tile", "queue this
+ * building". Whether any of it succeeds is up to the simulation.
+ */
+public class PlayerAgent extends AIController {
+
+    /** Where the unit is trying to go, in world units. Null means hold position. */
+    private Vec2 moveTarget;
+
+    /** Tile the unit is trying to mine. Null means stop mining. */
+    private Tile mining;
+
+    /** Set when the unit is close enough to the core to unload what it carries. */
+    private boolean unloading;
+
+    // Intent -----------------------------------------------------------------------
+
+    public void moveTo(float tileX, float tileY) {
+        moveTarget = new Vec2(tileX * Vars.tilesize, tileY * Vars.tilesize);
+    }
+
+    public void stopMoving() {
+        moveTarget = null;
+    }
+
+    /**
+     * Queue a building.
+     *
+     * <p>Range is not checked here on purpose. The engine skips plans that are out of
+     * reach and keeps them queued, exactly as it does for a player who queued something
+     * across the map, so the agent learns that it has to travel rather than being told no.
+     */
+    public String build(Block block, int x, int y, int rotation) {
+        Unit unit = unit();
+        if (unit == null) {
+            return "no unit";
+        }
+        if (block == null) {
+            return "unknown block";
+        }
+        if (!unit.canBuild()) {
+            return "this unit cannot build";
+        }
+        unit.addBuild(new BuildPlan(x, y, rotation, block, null));
+        return null;
+    }
+
+    public String breakBlock(int x, int y) {
+        Unit unit = unit();
+        Tile tile = Vars.world.tile(x, y);
+        if (unit == null || tile == null) {
+            return "no unit or tile";
+        }
+        unit.addBuild(new BuildPlan(x, y));
+        return null;
+    }
+
+    public void clearBuildQueue() {
+        Unit unit = unit();
+        if (unit != null) {
+            unit.clearBuilding();
+        }
+    }
+
+    /**
+     * Start mining a tile.
+     *
+     * <p>Refused for the reasons the game refuses a player: no ore, an ore too hard for
+     * this unit's drill tier, or a unit that cannot mine at all. Distance is not one of
+     * them: being too far simply means nothing happens until the unit gets closer.
+     */
+    public String mine(int x, int y) {
+        Unit unit = unit();
+        Tile tile = Vars.world.tile(x, y);
+        if (unit == null || tile == null) {
+            return "no unit or tile";
+        }
+        if (!unit.canMine()) {
+            return "this unit cannot mine";
+        }
+
+        Item drop = tile.drop();
+        if (drop == null) {
+            return "nothing to mine there";
+        }
+        if (!unit.canMine(drop)) {
+            return "ore too hard for this unit: " + drop.name;
+        }
+
+        mining = tile;
+        unit.mineTile = tile;
+        return null;
+    }
+
+    public void stopMining() {
+        mining = null;
+        Unit unit = unit();
+        if (unit != null) {
+            unit.mineTile = null;
+        }
+    }
+
+    /** Head to the core and hand over whatever is being carried. */
+    public void unload() {
+        unloading = true;
+    }
+
+    // Per-tick behaviour -------------------------------------------------------------
+
+    @Override
+    public void updateUnit() {
+        Unit unit = unit();
+        if (unit == null) {
+            return;
+        }
+
+        // Building and mining are driven by the engine from the unit's own state, which is
+        // why they are not touched here: updateBuilding() walks the plan queue and checks
+        // range itself, and mining runs off unit.mineTile.
+        if (mining != null && unit.mineTile != mining) {
+            unit.mineTile = mining;
+        }
+
+        if (unloading) {
+            handleUnloading(unit);
+            return;
+        }
+
+        if (moveTarget != null) {
+            approach(unit, moveTarget);
+        }
+
+        faceTarget(unit);
+    }
+
+    private void handleUnloading(Unit unit) {
+        CoreBlock.CoreBuild core = unit.closestCore();
+        if (core == null || unit.stack.amount == 0) {
+            unloading = false;
+            return;
+        }
+
+        approach(unit, new Vec2(core.x, core.y));
+
+        // The engine hands items over on its own once the unit is close enough, so all
+        // this has to do is get there and then stop asking.
+        if (unit.within(core, Vars.mineTransferRange)) {
+            unloading = false;
+        }
+    }
+
+    private void approach(Unit unit, Vec2 target) {
+        unit.movePref(new Vec2(target).sub(unit.x, unit.y).limit(unit.speed()));
+    }
+
+    private void faceTarget(Unit unit) {
+        if (mining != null) {
+            unit.lookAt(mining.worldx(), mining.worldy());
+        } else if (moveTarget != null) {
+            unit.lookAt(moveTarget.x, moveTarget.y);
+        }
+    }
+
+    // State for observations ---------------------------------------------------------
+
+    public boolean isMining() {
+        Unit unit = unit();
+        return unit != null && unit.mineTile != null;
+    }
+
+    public boolean isBuilding() {
+        Unit unit = unit();
+        return unit != null && unit.activelyBuilding();
+    }
+
+    public int queuedPlans() {
+        Unit unit = unit();
+        return unit == null ? 0 : unit.plans().size;
+    }
+
+    public Vec2 target() {
+        return moveTarget;
+    }
+
+    /**
+     * Spawn the unit a player would get from their core, and take control of it.
+     *
+     * @return the controller, or null if there is no core to spawn from
+     */
+    public static PlayerAgent spawnAtCore() {
+        CoreBlock.CoreBuild core = Vars.state.rules.defaultTeam.core();
+        if (core == null) {
+            return null;
+        }
+
+        var type = ((CoreBlock) core.block).unitType;
+        Unit unit = type.create(Vars.state.rules.defaultTeam);
+        unit.set(core.x, core.y);
+        unit.add();
+
+        PlayerAgent agent = new PlayerAgent();
+        unit.controller(agent);
+        Log.info("[mindustry-ai] agent embodied as @ at @,@",
+            type.name, (int) (core.x / Vars.tilesize), (int) (core.y / Vars.tilesize));
+        return agent;
+    }
+}

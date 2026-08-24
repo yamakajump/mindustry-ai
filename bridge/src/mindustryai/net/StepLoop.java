@@ -37,6 +37,15 @@ public class StepLoop implements ApplicationListener {
     private final ActionExecutor actions = new ActionExecutor();
     private final MapExporter exporter = new MapExporter();
 
+    /**
+     * The agent's body, when it plays as a player rather than editing the world.
+     *
+     * <p>Null keeps the old direct-edit behaviour, which stays available because it is
+     * far faster to train against and useful as an upper bound: whatever an embodied
+     * agent achieves, a disembodied one had fewer excuses.
+     */
+    private PlayerAgent body;
+
     /** Outcome of the action carried by the last step, reported in its observation. */
     private ActionExecutor.Result lastAction;
 
@@ -138,6 +147,7 @@ public class StepLoop implements ApplicationListener {
                 case "step" -> handleStep(message);
                 case "act" -> handleAct(message);
                 case "blocks" -> handleBlocks();
+                case "embody" -> handleEmbody();
                 case "map" -> handleMap();
                 case "sector" -> handleSector(message);
                 case "observe" -> respond(observation(false));
@@ -195,6 +205,20 @@ public class StepLoop implements ApplicationListener {
 
         encoder.rebuild();
         freeze();
+        respond(observation(false));
+    }
+
+    /** Take a body, so the agent plays under the same limits a human has. */
+    private void handleEmbody() {
+        if (!Vars.state.isGame()) {
+            server.reply(error("no game in progress, send reset first"));
+            return;
+        }
+        body = PlayerAgent.spawnAtCore();
+        if (body == null) {
+            server.reply(error("no core to spawn from"));
+            return;
+        }
         respond(observation(false));
     }
 
@@ -383,6 +407,31 @@ public class StepLoop implements ApplicationListener {
         try {
             return switch (kind.asString()) {
                 case "noop" -> new ActionExecutor.Result(true, null);
+                case "move" -> embodied(() -> {
+                    body.moveTo(action.get("x").asFloat(), action.get("y").asFloat());
+                    return null;
+                });
+                case "build" -> embodied(() -> body.build(
+                    Vars.content.block(action.get("block").asString()),
+                    action.get("x").asInt(),
+                    action.get("y").asInt(),
+                    action.get("rotation") == null ? 0 : action.get("rotation").asInt()));
+                case "demolish" -> embodied(() -> body.breakBlock(
+                    action.get("x").asInt(), action.get("y").asInt()));
+                case "mine" -> embodied(() -> body.mine(
+                    action.get("x").asInt(), action.get("y").asInt()));
+                case "stop_mine" -> embodied(() -> {
+                    body.stopMining();
+                    return null;
+                });
+                case "unload" -> embodied(() -> {
+                    body.unload();
+                    return null;
+                });
+                case "stop" -> embodied(() -> {
+                    body.stopMoving();
+                    return null;
+                });
                 case "place" -> actions.place(
                     action.get("block").asString(),
                     action.get("x").asInt(),
@@ -396,6 +445,17 @@ public class StepLoop implements ApplicationListener {
         } catch (Exception e) {
             return new ActionExecutor.Result(false, e.getClass().getSimpleName() + ": " + e.getMessage());
         }
+    }
+
+    /** Run a player action, or report that the agent has no body yet. */
+    private ActionExecutor.Result embodied(java.util.function.Supplier<String> action) {
+        if (body == null) {
+            return new ActionExecutor.Result(false, "agent has no body, send embody first");
+        }
+        String problem = action.get();
+        return problem == null
+            ? new ActionExecutor.Result(true, null)
+            : new ActionExecutor.Result(false, problem);
     }
 
     private void handleClose() {
@@ -475,6 +535,26 @@ public class StepLoop implements ApplicationListener {
             }
         }
         obs.put("items", items);
+
+        if (body != null && body.unit() != null) {
+            var unit = body.unit();
+            Jval self = Jval.newObject();
+            self.put("x", unit.x / Vars.tilesize);
+            self.put("y", unit.y / Vars.tilesize);
+            self.put("health", unit.health());
+            self.put("mining", body.isMining());
+            self.put("building", body.isBuilding());
+            self.put("plans", body.queuedPlans());
+            // In tiles, because every coordinate the agent sees is in tiles.
+            self.put("build_range", unit.type.buildRange / Vars.tilesize);
+            self.put("mine_range", unit.type.mineRange / Vars.tilesize);
+            self.put("mine_tier", unit.type.mineTier);
+            self.put("carrying", unit.stack.amount);
+            self.put("carrying_item", unit.stack.item == null ? "" : unit.stack.item.name);
+            self.put("capacity", unit.type.itemCapacity);
+            obs.put("unit", self);
+        }
+        obs.put("embodied", body != null);
 
         return obs;
     }
