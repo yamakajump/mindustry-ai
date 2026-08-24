@@ -7,11 +7,16 @@ import arc.files.Fi;
 import arc.struct.Seq;
 import arc.util.Log;
 import mindustry.Vars;
+import mindustry.content.Blocks;
 import mindustry.game.EventType.ClientLoadEvent;
 import mindustry.game.Gamemode;
+import mindustry.game.Rules;
+import mindustry.game.Team;
 import mindustry.maps.Map;
 import mindustry.mod.Mod;
 import mindustry.type.SectorPreset;
+import mindustry.world.Block;
+import mindustry.world.Tile;
 
 /**
  * Watch mindustry-ai agents play, inside the game itself.
@@ -109,6 +114,14 @@ public class ReplayMod extends Mod {
             Vars.ui.showInfoFade("Replay loaded. Space to play, arrows to step.", 5f);
         };
 
+        // The world first, because the replay carries it. Falling back to a named map is
+        // only for recordings older than that, and for the campaign presets.
+        if (replay.hasWorld()) {
+            buildWorld(replay);
+            Core.app.post(begin);
+            return;
+        }
+
         if (replay.sector != null) {
             SectorPreset preset = Vars.content.sectors().find(s -> s.name.equals(replay.sector));
             if (preset != null) {
@@ -123,12 +136,86 @@ public class ReplayMod extends Mod {
                 || candidate.plainName().equalsIgnoreCase(replay.map.replace('_', ' ')));
 
         if (map == null) {
-            Vars.ui.showInfo("Map not found: " + replay.map);
+            Vars.ui.showInfo(replay.map.isEmpty()
+                ? "This replay carries no world and names no map, so there is nothing to "
+                  + "play it on. It was recorded before replays became self-contained."
+                : "Map not found: " + replay.map);
             return;
         }
 
         Vars.control.playMap(map, map.applyRules(Gamemode.survival));
         Core.app.post(begin);
+    }
+
+    /**
+     * Rebuild the exact world the episode was played on, from the replay itself.
+     *
+     * <p>The agent trains on generated sectors, which have no name for the game to look
+     * up: asking for one produced "Map not found:" with nothing after the colon. The
+     * recorder already wrote every floor, ore and block into the header, so the world is
+     * in the file and there is nothing to look up.
+     *
+     * <p>Floors and ores go in through the generator. Blocks go in afterwards, one
+     * {@code setBlock} at a time, because a multi-tile building has to be linked to the
+     * tiles it covers and the exporter writes its id only at its origin. Building them
+     * inside the generator would leave a core as a single lonely tile.
+     */
+    private void buildWorld(ReplayFile replay) {
+        Vars.logic.reset();
+
+        Vars.world.loadGenerator(replay.width, replay.height, tiles -> {
+            for (int x = 0; x < replay.width; x++) {
+                for (int y = 0; y < replay.height; y++) {
+                    int index = y * replay.width + x;
+                    Block floor = lookup(replay, replay.floor[index], Blocks.stone);
+                    Block overlay = lookup(replay, replay.overlay[index], Blocks.air);
+                    tiles.set(x, y, new Tile(x, y,
+                        floor.isFloor() ? floor : Blocks.stone,
+                        overlay.isOverlay() ? overlay : Blocks.air,
+                        Blocks.air));
+                }
+            }
+        });
+
+        Vars.state.rules = new Rules();
+        Gamemode.survival.apply(Vars.state.rules);
+        // Off deliberately. A replay is a recording, not a match: waves arriving on their
+        // own timer would fight the agent's recorded actions for the same world.
+        Vars.state.rules.waves = false;
+        Vars.state.rules.waveTimer = false;
+
+        Vars.logic.play();
+
+        if (replay.block != null) {
+            for (int x = 0; x < replay.width; x++) {
+                for (int y = 0; y < replay.height; y++) {
+                    int index = y * replay.width + x;
+                    Block block = lookup(replay, replay.block[index], Blocks.air);
+                    if (block == Blocks.air || block.isFloor() || block.isOverlay()) {
+                        continue;
+                    }
+                    Tile tile = Vars.world.tile(x, y);
+                    if (tile == null) {
+                        continue;
+                    }
+                    int rotation = replay.rotation == null ? 0 : replay.rotation[index];
+                    // Static walls and boulders belong to nobody; anything a team can own
+                    // was standing at the start of the episode and belongs to the agent.
+                    Team team = block.isStatic() || !block.hasBuilding()
+                        ? Team.derelict : Vars.state.rules.defaultTeam;
+                    tile.setBlock(block, team, rotation);
+                }
+            }
+        }
+    }
+
+    private static Block lookup(ReplayFile replay, int index, Block fallback) {
+        String name = replay.palette.get(index);
+        if (name == null || name.isEmpty()) {
+            return fallback;
+        }
+        Block block = Vars.content.block(name);
+        return block == null ? fallback : block;
     }
 
     private void bindKeys() {

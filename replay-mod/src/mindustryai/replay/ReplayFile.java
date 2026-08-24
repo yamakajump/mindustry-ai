@@ -1,13 +1,17 @@
 package mindustryai.replay;
 
 import arc.files.Fi;
+import arc.struct.IntMap;
 import arc.struct.Seq;
 import arc.util.serialization.Jval;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.zip.GZIPInputStream;
+import java.util.zip.Inflater;
 
 /**
  * A recorded episode, read from the gzipped JSON Lines the Python recorder writes.
@@ -50,6 +54,28 @@ public class ReplayFile {
     public int coreX = -1, coreY = -1;
     public final Seq<Frame> frames = new Seq<>();
 
+    /**
+     * The world the episode was played on, carried by the replay itself.
+     *
+     * <p>A replay used to name a map and expect the game to have it. That works for the
+     * handful of hand-made maps and fails for every generated sector, which is what the
+     * agent now trains on: those have no name, so the mod had nothing to look up and said
+     * "Map not found:" with nothing after the colon.
+     *
+     * <p>The recorder already wrote the whole world into the header, so nothing had to be
+     * added to make a replay self-contained. Floors, ores and blocks are palette indices,
+     * two bytes each, row-major; rotations are one byte. All four are deflated and
+     * base64-encoded.
+     */
+    public int[] floor, overlay, block, rotation;
+
+    /** Palette index to block name, as the exporter wrote it. */
+    public final IntMap<String> palette = new IntMap<>();
+
+    public boolean hasWorld() {
+        return floor != null && width > 0 && height > 0;
+    }
+
     public static ReplayFile read(Fi file) throws Exception {
         ReplayFile replay = new ReplayFile();
 
@@ -90,10 +116,79 @@ public class ReplayFile {
         width = integer(header, "width", 0);
         height = integer(header, "height", 0);
 
+        Jval paletteEntries = header.get("palette");
+        if (paletteEntries != null && paletteEntries.isObject()) {
+            for (var entry : paletteEntries.asObject()) {
+                Jval value = entry.value;
+                String name = value.isObject() ? string(value, "name", "") : value.asString();
+                if (!name.isEmpty()) {
+                    palette.put(Integer.parseInt(entry.key), name);
+                }
+            }
+        }
+
+        int tiles = width * height;
+        floor = shorts(header, "floor", tiles);
+        overlay = shorts(header, "overlay", tiles);
+        block = shorts(header, "block", tiles);
+        rotation = bytes(header, "rotation", tiles);
+
         Jval core = header.get("core");
         if (core != null && core.isArray() && core.asArray().size >= 2) {
             coreX = core.asArray().get(0).asInt();
             coreY = core.asArray().get(1).asInt();
+        }
+    }
+
+    /** One deflated, base64 plane of little-endian unsigned shorts. */
+    private static int[] shorts(Jval header, String key, int count) {
+        byte[] raw = inflate(header, key);
+        if (raw == null || raw.length < count * 2) {
+            return null;
+        }
+        int[] values = new int[count];
+        for (int i = 0; i < count; i++) {
+            values[i] = (raw[i * 2] & 0xff) | ((raw[i * 2 + 1] & 0xff) << 8);
+        }
+        return values;
+    }
+
+    private static int[] bytes(Jval header, String key, int count) {
+        byte[] raw = inflate(header, key);
+        if (raw == null || raw.length < count) {
+            return null;
+        }
+        int[] values = new int[count];
+        for (int i = 0; i < count; i++) {
+            values[i] = raw[i] & 0xff;
+        }
+        return values;
+    }
+
+    private static byte[] inflate(Jval header, String key) {
+        Jval field = header.get(key);
+        if (field == null) {
+            return null;
+        }
+        try {
+            byte[] packed = Base64.getDecoder().decode(field.asString());
+            Inflater inflater = new Inflater();
+            inflater.setInput(packed);
+            ByteArrayOutputStream out = new ByteArrayOutputStream(packed.length * 4);
+            byte[] chunk = new byte[16384];
+            while (!inflater.finished()) {
+                int read = inflater.inflate(chunk);
+                if (read == 0 && (inflater.needsInput() || inflater.needsDictionary())) {
+                    break;
+                }
+                out.write(chunk, 0, read);
+            }
+            inflater.end();
+            return out.toByteArray();
+        } catch (Exception ignored) {
+            // A replay written by an older recorder has no world in it. Falling back to
+            // the map name is better than refusing to open it at all.
+            return null;
         }
     }
 

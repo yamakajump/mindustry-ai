@@ -89,6 +89,18 @@ class ReplayRecorder:
             "description": self.env.task.description,
             "map": self.env.task.map_name,
             "note": self.note,
+            # Enough to put the same world back on a server and re-run the episode for
+            # real. A generated sector has no name, so the index is the only handle on
+            # it, and without it `tools/watch.py` had nothing to load and the in-game
+            # reader said "Map not found:" with nothing after the colon.
+            "sector": self.env.task.sector,
+            "sector_index": self.env.sector_index,
+            "loadout": self.env.task.loadout,
+            # Whether the agent had a body. A replay of an embodied episode re-run
+            # without one shows blocks appearing out of nowhere instead of a unit flying
+            # over to build them, which is not what happened.
+            "embodied": bool(self.env.embodied),
+            "ticks_per_step": self.env.task.ticks_per_step,
             "width": typed["width"],
             "height": typed["height"],
             "core": [int(raw.get("core_x", -1)), int(raw.get("core_y", -1))],
@@ -175,6 +187,11 @@ class ReplayRecorder:
                 frame["act"] = {"t": "break", "x": int(action[2]), "y": int(action[3])}
             elif kind in ("move", "mine"):
                 frame["act"] = {"t": kind, "x": int(action[2]), "y": int(action[3])}
+            elif kind == "unload":
+                # How an embodied agent banks what it carries. Left out, a re-run of the
+                # episode never pays anything into the core, so it cannot afford the
+                # blocks it went on to build and the replay diverges from what happened.
+                frame["act"] = {"t": "unload"}
         return frame
 
     def finish(self) -> None:

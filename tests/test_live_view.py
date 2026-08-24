@@ -392,3 +392,32 @@ def test_the_best_checkpoint_is_not_decided_by_one_lucky_episode() -> None:
 
     # One lucky episode in thirty moves the average by five points, not by a hundred.
     assert abs(monitor.recent_mean(episodes=30) - (-30.167)) < 0.01
+
+
+def test_every_kind_of_action_is_replayed_not_only_construction() -> None:
+    """An episode is a unit flying to ore, holding over it, carrying the load back and
+    queuing a building. A replay that reissued only the placements showed blocks appearing
+    on an empty map with nobody there to have built them."""
+    from tools.watch import replayed_action
+
+    assert replayed_action({"t": "move", "x": 4, "y": 9}, True) == {
+        "type": "move", "x": 4, "y": 9}
+    assert replayed_action({"t": "mine", "x": 4, "y": 9}, True) == {
+        "type": "mine", "x": 4, "y": 9}
+    assert replayed_action({"t": "unload"}, True) == {"type": "unload"}
+    assert replayed_action(None, True) is None
+
+
+def test_an_embodied_episode_is_replayed_through_a_body() -> None:
+    """What the direct action space calls `place`, the embodied one calls `build`, because
+    the second asks a unit to go and do it rather than editing the world. Replaying an
+    embodied episode with the direct names would make every block appear instantly."""
+    from tools.watch import replayed_action
+
+    placed = {"t": "place", "b": "conveyor", "x": 3, "y": 7, "r": 2}
+    assert replayed_action(placed, True)["type"] == "build"
+    assert replayed_action(placed, False)["type"] == "place"
+
+    broken = {"t": "break", "x": 3, "y": 7}
+    assert replayed_action(broken, True)["type"] == "demolish"
+    assert replayed_action(broken, False)["type"] == "break"

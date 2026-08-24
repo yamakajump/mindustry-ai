@@ -191,6 +191,16 @@ python tools/watch.py           # best episode of the last run, in the Mindustry
 python tools/watch.py --list    # everything archived, best first
 ```
 
+That one is a **re-simulation, not a recording**: the episode's world is loaded on a real
+server, the agent's own moves, mining, banking and building are reissued in order, and you
+join as a spectator. So you see what a player would have seen, waves and units and all,
+rather than blocks appearing on an empty map.
+
+The in-game reader is the other half. `python tools/install_mod.py` puts it in Mindustry
+along with the replays, and the **AI replay** button in the main menu opens them without
+anything else running. It rebuilds the world from the replay itself, which is why it works
+on generated sectors that exist under no name.
+
 ### Or join it in the real game
 
 Every environment is a real headless server with its game port open. The watched match
