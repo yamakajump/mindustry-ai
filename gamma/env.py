@@ -20,6 +20,7 @@ import numpy as np
 from gymnasium import spaces
 
 from gamma.bridge import Bridge
+from gamma.adapt import route, split
 from gamma.sectors import SectorPool, build_pool
 from gamma.server import ServerProcess, install_plugin
 from gamma.server_setup import setup_server
@@ -27,6 +28,9 @@ from gamma.tasks import Task
 
 #: Action types when the agent has no body: it edits the world directly.
 DIRECT_ACTION_TYPES = ("noop", "place", "break")
+
+#: Added on top of either space when the environment is given a design library.
+STAMP = "stamp"
 
 #: Action types when the agent inhabits a unit, which is what a player can do.
 #: Building is queued rather than applied, and only completes once the unit is in range.
@@ -93,9 +97,31 @@ class MindustryEnv(gym.Env):
         embodied: bool = False,
         evaluating: bool = False,
         seed: int | None = None,
+        designs: tuple = (),
     ) -> None:
         super().__init__()
         self.task = task
+        #: Structures the search discovered, offered to the policy as single actions.
+        #:
+        #: A conveyor line from a drill to the core pays nothing until it is complete, and
+        #: a policy choosing tiles one at a time never completes one: measured over 177
+        #: archived episodes, 5,719 conveyors placed and one line that ever met end to end.
+        #: Handed a structure as one action, the policy stops spelling and starts deciding
+        #: which patch, how many, and when, which is the part worth learning.
+        #:
+        #: Nothing here is a human blueprint. Every design comes out of `gamma/evolve.py`,
+        #: scored on what it delivered in a real game.
+        self.designs = tuple(designs)
+        # Designs share the block dimension of the action space rather than getting one of
+        # their own. Widening the space without widening the mask would have been worse
+        # than useless: the mask is what sets the size of the network's head, so the two
+        # would have disagreed and the disagreement would have surfaced as a shape error
+        # somewhere far from here.
+        if len(self.designs) > len(blocks):
+            raise ValueError(
+                f"{len(self.designs)} designs will not fit in a block dimension of "
+                f"{len(blocks)}: they share it"
+            )
         # Drawing from the held-out half of the sector pool. Set only by the evaluator:
         # a training run that touched these would make its own score meaningless.
         self.evaluating = evaluating
@@ -272,7 +298,8 @@ class MindustryEnv(gym.Env):
 
     @property
     def action_types(self) -> tuple[str, ...]:
-        return EMBODIED_ACTION_TYPES if self.embodied else DIRECT_ACTION_TYPES
+        base = EMBODIED_ACTION_TYPES if self.embodied else DIRECT_ACTION_TYPES
+        return base + (STAMP,) if self.designs else base
 
     # Conversion ------------------------------------------------------------------
 
@@ -295,11 +322,44 @@ class MindustryEnv(gym.Env):
             "global": np.asarray(values, dtype=np.float32),
         }
 
+    def _stamp(self, action: np.ndarray) -> None:
+        """Lay a whole structure, one bridge action per block, before the world ticks.
+
+        The policy chooses the design and where to put it. Everything after that is
+        geometry: the drills go down first, because one needs two clear tiles by two and a
+        conveyor laid on a tile it wanted makes it impossible, and the line to the core is
+        recomputed for the distance it actually has to cover.
+
+        Refusals are left alone. A structure that does not fit where it was asked for is
+        an ordinary answer, and the policy should feel it as one rather than have it
+        quietly corrected.
+        """
+        bridge = self._ensure_started()
+        design = self.designs[int(action[1]) % len(self.designs)]
+        anchor = (int(action[2]), int(action[3]))
+        core = (int(self._last_obs.get("core_x", -1)), int(self._last_obs.get("core_y", -1)))
+        if core[0] < 0:
+            return
+
+        cells = [(anchor[0] + p.dx, anchor[1] + p.dy, p.block, p.rotation)
+                 for p in split(design).producers]
+        cells += route(anchor, core)
+        cells.sort(key=lambda cell: 0 if "drill" in cell[2] else 1)
+
+        for x, y, block, rotation in cells:
+            bridge.act({"type": "build" if self.embodied else "place",
+                        "block": block, "x": x, "y": y, "rotation": rotation})
+
     def _decode(self, action: np.ndarray) -> dict[str, Any] | None:
         kind = self.action_types[int(action[0])]
         x, y = int(action[2]), int(action[3])
 
         if kind == "noop":
+            return None
+        if kind == STAMP:
+            # Applied before the tick rather than as part of it: a structure is many
+            # placements and the step protocol carries one.
+            self._stamp(action)
             return None
         if kind in ("place", "build"):
             return {

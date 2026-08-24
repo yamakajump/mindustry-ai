@@ -150,3 +150,33 @@ def test_copies_go_to_different_patches() -> None:
     drills = [(x, y) for x, y, block, _ in twice if "drill" in block]
     assert len(twice) > len(once)
     assert len(set(drills)) == len(drills), "two copies landed on the same tiles"
+
+
+# The design as an action -----------------------------------------------------------------
+
+
+def test_a_library_adds_one_action_type_and_no_more() -> None:
+    """The policy gains "put a structure here". It keeps every primitive it had, so if it
+    ever finds something better than the structure, nothing stops it."""
+    from gamma.env import DIRECT_ACTION_TYPES, MindustryEnv
+
+    bare = MindustryEnv.__new__(MindustryEnv)
+    bare.embodied, bare.designs = False, ()
+    assert bare.action_types == DIRECT_ACTION_TYPES
+
+    stocked = MindustryEnv.__new__(MindustryEnv)
+    stocked.embodied, stocked.designs = False, (trunk(),)
+    assert stocked.action_types == DIRECT_ACTION_TYPES + ("stamp",)
+    assert set(DIRECT_ACTION_TYPES) < set(stocked.action_types)
+
+
+def test_more_designs_than_the_block_dimension_is_refused(tmp_path) -> None:
+    """They share that dimension, and the mask is what sets the size of the network's
+    head. Widening one without the other would surface as a shape error far from here."""
+    from gamma.env import MindustryEnv
+
+    with pytest.raises(ValueError, match="will not fit"):
+        MindustryEnv(
+            task=None, server_dir=str(tmp_path), blocks=("conveyor",),
+            designs=(trunk(), trunk()),
+        )

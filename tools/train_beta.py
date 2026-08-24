@@ -35,6 +35,7 @@ from gamma import tasks
 from gamma.archive import ReplayArchive
 from gamma.cleanup import kill_servers
 from gamma.env import MindustryEnv
+from gamma.library import load as load_designs
 from gamma.monitor import TrainingMonitor
 from gamma.replay import ReplayRecorder, _encode_bytes
 from tools.extract_sprites import ensure_assets
@@ -153,6 +154,15 @@ class EnvWorker:
 
         jar = str(ensure_jar())
 
+        # Structures the search found, handed to the policy as single actions. A line from
+        # a drill to the core pays nothing until it is complete, and a policy choosing
+        # tiles one at a time never completes one: 5,719 conveyors placed across 177
+        # archived episodes and one line that ever met end to end. With a structure as one
+        # action the policy stops spelling and starts deciding which patch and how many.
+        designs = ()
+        if self.args.designs and Path(self.args.designs).is_file():
+            designs = tuple(load_designs(Path(self.args.designs)))
+
         # The showcase runs at a speed a person can follow. Training speed is uncapped,
         # which is unwatchable: a ten minute match goes by in a moment. It is a separate
         # environment rather than one of the training ones precisely because a slow one in
@@ -166,6 +176,7 @@ class EnvWorker:
             jar=jar,
             embodied=self.args.embodied,
             speed=str(self.args.watch_speed) if watched else "max",
+            designs=designs,
         )
 
         # Every match records, not just the one being watched.
@@ -478,6 +489,10 @@ def main() -> None:
                         help="animation frames collected per second and per match")
     parser.add_argument("--root", default="mindustry-beta")
     parser.add_argument("--out", type=Path, default=Path("checkpoints"))
+    parser.add_argument("--designs", default="docs/designs.json",
+                        help="structures discovered by tools/evolve_layout.py, offered to "
+                             "the policy as single actions; pass an empty string to train "
+                             "on the primitives alone")
     parser.add_argument("--resume", action="store_true", default=True,
                         help="continue from checkpoints/beta.pt when it exists")
     parser.add_argument("--fresh", dest="resume", action="store_false",
