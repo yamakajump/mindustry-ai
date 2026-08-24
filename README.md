@@ -71,6 +71,21 @@ Full details in [`docs/architecture.md`](docs/architecture.md). The reasoning be
 choice, including the alternatives that were rejected, is in
 [`docs/decisions/`](docs/decisions/).
 
+## Watch training happen
+
+```bash
+python tools/train_watch.py --matches 6 --embodied
+```
+
+Opens a dashboard on `127.0.0.1:8800` with every match running side by side: a mini map
+per match showing the core, the agent's unit and everything it has built, plus step,
+wave, reward, refusals, core stock, a progress bar against the objective, a leaderboard
+and a trend line over recent episodes.
+
+Each match is its own Mindustry process, because the engine is not thread safe. No
+dependencies beyond the standard library: a dashboard that needs a web framework
+installed is a dashboard that is not running when you want it.
+
 ## Watch it play
 
 Two ways, and they are not equivalent.
@@ -127,11 +142,24 @@ are stored, not the state. The same format will carry live training over a WebSo
 The first curriculum task is live, with a benchmark. `T1` asks an agent to grow the core's
 copper stock to 250 within 450 decisions, which is the budget before the first wave lands.
 
+**Direct mode**, where the agent edits the world without a body:
+
 | Policy | Solved | Mean reward | Actions accepted |
 |---|---|---|---|
 | Random | 0/5 | -1.98 | 9% |
 | Masked random | 0/5 | -2.00 | 11% |
 | **Alpha** (scripted) | **2/5** | **+4.12** | **60%** |
+
+**Embodied**, where it inhabits a unit and plays under a player's limits: it has to fly to
+the ore, mine by hand, carry the load back, and can only build within about 27 tiles.
+
+| Policy | Mean final copper | Mean reward |
+|---|---|---|
+| Masked random | 0 | -2.00 |
+| **Embodied Alpha** | **192** | **-0.08** |
+
+Acceptance rate stops being informative once there is a body: `move` is nearly always
+legal, so a policy can be accepted 95% of the time while bankrupting itself.
 
 Random policies do not merely score badly, they go bankrupt: they spend the starting
 copper on blocks placed at random, build nothing that produces, and every later action is
