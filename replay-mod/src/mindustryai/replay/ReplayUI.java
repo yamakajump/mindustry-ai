@@ -47,7 +47,7 @@ public class ReplayUI {
             .size(44f).tooltip("back one step");
 
         transport.button(Icon.play, Styles.emptyi, controller::toggle)
-            .size(52f).tooltip("play or pause, or press space")
+            .size(52f).tooltip("play or pause (space)")
             .update(button -> button.getStyle().imageUp = controller.playing() ? Icon.pause : Icon.play);
 
         transport.button(Icon.rightSmall, Styles.emptyi, () -> controller.step(1))
@@ -83,9 +83,9 @@ public class ReplayUI {
         root.add(status).padTop(2f).row();
 
         Table speeds = new Table();
-        for (float value : new float[]{0.5f, 1f, 2f, 4f, 8f}) {
-            speeds.button(Strings.autoFixed(value, 1) + "x", Styles.flatt, () -> controller.speed(value))
-                .width(58f).height(34f).padRight(3f)
+        for (float value : new float[]{0.1f, 0.25f, 0.5f, 1f, 2f, 4f, 8f, 16f, 32f, 64f}) {
+            speeds.button(label(value), Styles.flatt, () -> controller.speed(value))
+                .width(46f).height(32f).padRight(2f)
                 .checked(button -> Math.abs(controller.speed() - value) < 0.01f);
         }
         speeds.button(Icon.eyeSmall, Styles.flati, this::focusCore)
@@ -128,6 +128,11 @@ public class ReplayUI {
                 }).color(Color.white).align(Align.right);
             }).padTop(70f).padRight(10f);
         });
+    }
+
+    /** Compact speed label: "0.1x" below one, "64x" above. */
+    private static String label(float value) {
+        return (value < 1f ? Strings.autoFixed(value, 2) : String.valueOf((int) value)) + "x";
     }
 
     private ReplayFile.Frame currentFrame() {

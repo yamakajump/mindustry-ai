@@ -72,7 +72,7 @@ public class ReplayMod extends Mod {
         var dialog = new mindustry.ui.dialogs.BaseDialog("AI replay");
         dialog.cont.pane(list -> {
             for (Fi file : files) {
-                list.button(file.nameWithoutExtension(), () -> {
+                list.button(file.name().replace(".jsonl.gz", ""), () -> {
                     dialog.hide();
                     open(file);
                 }).width(420f).height(52f).row();
@@ -136,9 +136,9 @@ public class ReplayMod extends Mod {
             if (!controller.loaded() || Vars.ui.chatfrag.shown() || Vars.ui.consolefrag.shown()) {
                 return;
             }
-            if (Core.input.keyTap(KeyCode.space)) {
-                controller.toggle();
-            }
+            // Space is deliberately not bound. Mindustry already pauses on it, and
+            // binding it here toggled the game and the controller in opposite directions,
+            // so one press appeared to do nothing and the button showed the wrong state.
             if (Core.input.keyTap(KeyCode.right)) {
                 controller.step(1);
             }

@@ -39,9 +39,14 @@ public class ReplayController {
 
     private ReplayFile replay;
     private int cursor;
-    private boolean playing;
     private float speed = 1f;
     private float tickBudget;
+
+    /** Set while a seek is rebuilding state, so playback does not fight it. */
+    private boolean seeking;
+
+    /** Guards against recursion: extra logic updates fire Trigger.update again. */
+    private boolean insideExtraUpdate;
 
     /** step index to a full world save. */
     private final IntMap<byte[]> snapshots = new IntMap<>();
@@ -50,6 +55,21 @@ public class ReplayController {
 
     public void install() {
         Events.run(Trigger.update, this::update);
+
+        // Slowing down and speeding up are not symmetric, and treating them the same
+        // breaks the game.
+        //
+        // Below 1x the clock is simply scaled: a smaller delta is always safe, and it
+        // slows everything together, conveyors and units included, which is the point.
+        //
+        // Above 1x the clock is left alone and extra logic updates are run instead.
+        // Mindustry clamps delta at 3 for a reason: movement and collision assume small
+        // steps, and a delta of 64 would let units pass straight through walls. Fast
+        // forward has to be more frames, not bigger ones.
+        Time.setDeltaProvider(() -> {
+            float raw = Math.min(Core.graphics.getDeltaTime() * 60f, 3f);
+            return loaded() && speed < 1f ? raw * speed : raw;
+        });
     }
 
     public void onChange(Runnable listener) {
@@ -61,7 +81,6 @@ public class ReplayController {
     public void load(ReplayFile file) {
         this.replay = file;
         this.cursor = 0;
-        this.playing = false;
         this.tickBudget = 0f;
         snapshots.clear();
         snapshot(0);
@@ -82,15 +101,13 @@ public class ReplayController {
         if (!loaded()) {
             return;
         }
-        playing = true;
-        if (Vars.state.isPaused()) {
+        if (Vars.state.isGame() && Vars.state.isPaused()) {
             Vars.state.set(State.playing);
         }
         changed();
     }
 
     public void pause() {
-        playing = false;
         if (Vars.state.isGame() && !Vars.state.isPaused()) {
             Vars.state.set(State.paused);
         }
@@ -98,15 +115,22 @@ public class ReplayController {
     }
 
     public void toggle() {
-        if (playing) {
+        if (playing()) {
             pause();
         } else {
             play();
         }
     }
 
+    /**
+     * Whether the replay is running.
+     *
+     * <p>Read from the game state rather than tracked separately. Mindustry already binds
+     * space to pause, so a private flag meant one keypress toggled two things that then
+     * disagreed, and the button showed the opposite of what was happening.
+     */
     public boolean playing() {
-        return playing;
+        return Vars.state.isGame() && !Vars.state.isPaused();
     }
 
     public float speed() {
@@ -114,7 +138,7 @@ public class ReplayController {
     }
 
     public void speed(float value) {
-        speed = Math.max(0.25f, Math.min(value, 16f));
+        speed = Math.max(0.05f, Math.min(value, 64f));
         changed();
     }
 
@@ -148,14 +172,13 @@ public class ReplayController {
             cursor = from;
         }
 
-        boolean wasPlaying = playing;
-        playing = false;
+        seeking = true;
         while (cursor < target) {
             applyFrame(replay.frames.get(cursor));
             cursor++;
             maybeSnapshot();
         }
-        playing = wasPlaying;
+        seeking = false;
         tickBudget = 0f;
         changed();
     }
@@ -209,17 +232,31 @@ public class ReplayController {
     // Playback --------------------------------------------------------------------
 
     private void update() {
-        if (!playing || !loaded() || !Vars.state.isPlaying()) {
+        if (seeking || insideExtraUpdate || !loaded() || !Vars.state.isPlaying()) {
             return;
+        }
+
+        // Fast forward: run the world several times this frame rather than once with a
+        // huge step. Each extra pass is a normal tick, so the simulation stays valid.
+        int extra = speed > 1f ? Math.round(speed) - 1 : 0;
+        if (extra > 0) {
+            insideExtraUpdate = true;
+            try {
+                for (int i = 0; i < extra; i++) {
+                    Vars.logic.update();
+                }
+            } finally {
+                insideExtraUpdate = false;
+            }
         }
         if (cursor >= replay.frames.size) {
             pause();
             return;
         }
 
-        // Time.delta is the engine's own tick accounting, so playback speed rides on the
-        // same clock as everything else and stays correct if the game itself slows down.
-        tickBudget += Time.delta * speed;
+        // Time.delta already carries the speed multiplier, so actions land at the same
+        // point in game time whatever the playback rate.
+        tickBudget += Time.delta;
         while (tickBudget >= TICKS_PER_STEP && cursor < replay.frames.size) {
             tickBudget -= TICKS_PER_STEP;
             applyFrame(replay.frames.get(cursor));

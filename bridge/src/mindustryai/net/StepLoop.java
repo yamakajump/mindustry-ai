@@ -291,11 +291,42 @@ public class StepLoop implements ApplicationListener {
             Vars.netServer.openServer();
         }
 
+        prepareCampaign();
         applyLoadout(message.get("loadout"));
 
         encoder.rebuild();
         freeze();
         respond(observation(false));
+    }
+
+    /**
+     * Give a directly loaded sector the starting conditions a campaign player would have.
+     *
+     * <p>Two things are missing otherwise, and both are silent.
+     *
+     * <p>Nothing is researched, so {@code unlockedNow()} is false for every block and the
+     * agent cannot place a single one. Measured on Ground Zero: 39 attempts, 39 refusals,
+     * all reading "block is not placeable". A player starting the campaign has the basic
+     * blocks available, so unlocking them here reproduces the real starting point rather
+     * than granting an advantage.
+     *
+     * <p>And {@code Rules.waves} defaults to false, so no wave ever arrives. Ground Zero
+     * is captured by surviving to wave 10, which is unreachable if waves never start: the
+     * episode ran 120,000 ticks and stayed on wave 1.
+     */
+    private void prepareCampaign() {
+        Vars.state.rules.waves = true;
+        Vars.state.rules.waveTimer = true;
+
+        for (var block : Vars.content.blocks()) {
+            if (block.isPlaceable()) {
+                block.unlock();
+                Vars.state.rules.researched.add(block);
+            }
+        }
+        for (var item : Vars.content.items()) {
+            Vars.state.rules.researched.add(item);
+        }
     }
 
     /**
