@@ -160,11 +160,13 @@ class ReplayRecorder:
         # stream of delivery points afterwards took three separate probes against a live
         # server because no episode could say what it had been paid for. Only the non-zero
         # terms are written, so a quiet step costs nothing.
-        terms = getattr(self.env.task.reward, "terms", None)
+        # Read off what the reward actually paid, rather than recomputing it. The reward
+        # keeps a per-episode ledger, so asking it a second time about the same step would
+        # answer against a ledger that has already moved on.
+        paid = getattr(self.env.task.reward, "last_terms", None)
         itemised = None
-        if terms is not None and self._previous_raw is not None:
-            itemised = {k: round(v, 4) for k, v in terms(self._previous_raw, raw).items()
-                        if abs(v) > 1e-9}
+        if paid:
+            itemised = {k: round(v, 4) for k, v in paid.items() if abs(v) > 1e-9}
         self._previous_raw = raw
 
         frame: dict[str, Any] = {

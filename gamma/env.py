@@ -491,6 +491,12 @@ class MindustryEnv(gym.Env):
 
         self._steps = 0
         self._last_obs = raw
+
+        # A reward may keep a ledger across a step, and a ledger that survives a reset
+        # would carry one episode's delivery into the next one's milestones.
+        if hasattr(self.task.reward, "reset"):
+            self.task.reward.reset()
+
         return self._encode(raw), {"action_mask": self._masks(raw), "raw": raw}
 
     def step(

@@ -35,7 +35,11 @@ def state(**fields) -> dict:
 
 @pytest.fixture
 def reward():
-    return tasks.get("frontier").reward
+    # Remis a zero entre les tests : la recompense tient un registre par episode, et un
+    # test qui herite du registre du precedent echoue sur ce que le precedent a fait.
+    scorer = tasks.get("frontier").reward
+    scorer.reset()
+    return scorer
 
 
 # The ladder ---------------------------------------------------------------------------
@@ -77,12 +81,47 @@ def test_the_first_automated_ore_is_the_biggest_single_step(reward) -> None:
     assert step > max(others)
 
 
-def test_thresholds_crossed_in_one_step_all_pay(reward) -> None:
-    """A step that jumps from nothing to a thousand ore collects every rung below it, not
-    only the top one. Rewarding the highest crossed would make a slow climb worth more
-    than a fast one."""
-    once = reward(state(), state(produced={"copper": 1_000}))
-    assert once == pytest.approx(30.0 + 30.0 + 60.0 + 1_000 * 0.1)
+def test_thresholds_crossed_along_the_way_all_pay(reward) -> None:
+    """Every rung below the one reached is collected, not only the top one. Paying only
+    the highest crossed would make a slow climb worth more than a fast one.
+
+    Delivered a rung at a time, because a single step cannot be credited more than
+    `DELIVERY_CAP` items, which is the whole point of the ledger.
+    """
+    total = 0.0
+    before = state()
+    for delivered in range(50, 1_051, 50):
+        after = state(produced={"copper": delivered})
+        total += reward(before, after)
+        before = after
+
+    # automation, automation_100 and automation_1k, plus a copper apiece for the ore.
+    assert total == pytest.approx(30.0 + 30.0 + 60.0 + 1_050 * 0.1)
+
+
+def test_a_windfall_cannot_buy_a_rung(reward) -> None:
+    """The reason the ledger exists.
+
+    Something in a generated sector hands the core a whole stockpile in one step: 107 of
+    237 archived episodes contained exactly one, median 1,194 items and up to 5,251,
+    arriving with metaglass and graphite the agent cannot make. Those single steps carried
+    22.1% of every point the run scored, and one traced case paid 99.57 on a step whose
+    only action was to move, 80 of it milestones.
+
+    A thousand ore at once is now credited fifty, so it crosses the first rung and nothing
+    above it. Delivered honestly, the same thousand crosses three.
+    """
+    windfall = reward(state(), state(produced={"copper": 1_000, "metaglass": 400}))
+
+    reward.reset()
+    honest = 0.0
+    before = state()
+    for delivered in range(50, 1_001, 50):
+        after = state(produced={"copper": delivered})
+        honest += reward(before, after)
+        before = after
+
+    assert windfall < honest / 3
 
 
 # Automation against hand mining -------------------------------------------------------
@@ -92,13 +131,28 @@ def test_a_machine_is_worth_fifty_hands(reward) -> None:
     """Same ore in the core, different origin. If hand mining ever paid as well, the agent
     would have no reason to build anything, and the gap widened when delivery was
     reweighted so that producing outearns hiding."""
-    machine = reward(
+    def primed():
+        """A ledger already past the low rungs, so neither branch collects one.
+
+        Without this the first fifty ore of the episode also cross `automation`, worth
+        thirty, which swamps the two-tenths under comparison.
+        """
+        scorer = tasks.get("frontier").reward
+        scorer.reset()
+        before = state(produced={})
+        for delivered in range(50, 501, 50):
+            after = state(produced={"copper": delivered})
+            scorer(before, after)
+            before = after
+        return scorer
+
+    machine = primed()(
         state(produced={"copper": 500}, items={"copper": 800}),
-        state(produced={"copper": 600}, items={"copper": 900}),
+        state(produced={"copper": 550}, items={"copper": 850}),
     )
-    hand = reward(
+    hand = primed()(
         state(produced={"copper": 500}, items={"copper": 800}),
-        state(produced={"copper": 500}, items={"copper": 900}),
+        state(produced={"copper": 500}, items={"copper": 850}),
     )
     assert machine == pytest.approx(hand * 50)
 
@@ -155,6 +209,8 @@ def test_every_milestone_reads_a_counter_that_only_climbs() -> None:
     again every time it recovered."""
     empty = state()
     full = state(
+        credited=20_000.0,
+        credited_variety=3,
         produced={"copper": 20_000, "lead": 5_000, "coal": 100},
         placed={c: 9 for c in ("production", "distribution", "defense", "turret",
                                "power", "crafting", "units")},
@@ -203,9 +259,57 @@ def test_producing_outearns_hiding(reward) -> None:
     """The balance the old weights got backwards. Measured on thirty held-out episodes:
     the trained policy beat a coward's ceiling while delivering nothing, because a lost
     core cost fifty against a plausible ten for a whole episode of production."""
-    produced_then_died = reward(
-        state(), state(produced={"copper": 1_000}, has_core=False, core_health=0.0)
-    )
+    produced_then_died = 0.0
+    before = state()
+    for delivered in range(50, 1_001, 50):
+        after = state(produced={"copper": delivered})
+        produced_then_died += reward(before, after)
+        before = after
+    produced_then_died += reward(before, state(produced={"copper": 1_000},
+                                               has_core=False, core_health=0.0))
+
+    reward.reset()
     hid_and_survived = reward(state(), state(wave=8))
 
     assert produced_then_died > hid_and_survived
+
+
+def test_delivery_pays_by_what_the_ore_cost_to_get() -> None:
+    """Ten sand is not ten titanium, and the reward used to say it was.
+
+    The counter behind delivery is a plain sum over items, so a drill sitting on a sand
+    patch earned exactly what a titanium line earned. Measured over 73 episodes of a real
+    run, by what ended up in the core: copper 51.7%, lead 18.9%, sand 14.2%. A seventh of
+    the income came from the one resource that needs nothing but a drill and bare ground.
+
+    Read through `terms` rather than the total, because the total also carries the
+    automation milestones, which fire on how many items arrived and would drown the very
+    difference under test.
+    """
+    terms = tasks.get("frontier").reward.terms
+    paid = lambda produced: terms(state(), state(produced=produced))["delivered"]
+
+    assert paid({"sand": 10}) == pytest.approx(0.3)
+    assert paid({"copper": 10}) == pytest.approx(1.0)
+    assert paid({"titanium": 10}) == pytest.approx(6.0)
+    assert paid({"thorium": 10}) == pytest.approx(12.0)
+
+
+def test_sand_does_not_buy_the_variety_milestones() -> None:
+    """`two_ores` is worth 20 points and means two supply lines, not two drills.
+
+    Both branches deliver the same number of items, so both cross the same automation
+    rungs; the only thing that can differ between them is the variety milestone.
+    """
+    scorer = tasks.get("frontier").reward
+
+    scorer.reset()
+    before = state(produced={"copper": 50})
+    scorer(state(), before)
+    with_sand = scorer(before, state(produced={"copper": 50, "sand": 40}))
+
+    scorer.reset()
+    scorer(state(), before)
+    with_lead = scorer(before, state(produced={"copper": 50, "lead": 40}))
+
+    assert with_lead - with_sand == pytest.approx(20.0 + 40 * 0.7 * 0.1)

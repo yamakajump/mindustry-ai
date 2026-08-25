@@ -208,6 +208,58 @@ def shaped(
 # Milestones ---------------------------------------------------------------------------
 
 
+#: What a delivered item is worth, relative to copper.
+#:
+#: Delivery used to pay the same for everything, and the counter is a plain sum, so a
+#: drill sitting on sand earned exactly what a titanium line earned. Measured over the
+#: last 73 episodes of a real run, by what ended up in the core: copper 51.7%, lead 18.9%,
+#: **sand 14.2%**, metaglass 8.4%, graphite 4.6%, coal 0.8%, titanium 0.7%. A seventh of
+#: the income was the one resource that needs nothing but a drill and a patch of ground.
+#:
+#: The scale follows what the game makes you build to obtain each one, which is the only
+#: honest ordering available: sand and scrap come out of bare ground, copper and lead are
+#: the baseline every base starts on, coal wants a patch or a press, graphite and silicon
+#: and metaglass want a powered crafter, titanium wants a pneumatic drill which wants
+#: graphite, thorium wants a laser drill which wants silicon and power, and the top tier
+#: wants several chains meeting at once.
+#:
+#: Farming this is not a concern the way the generator annuity was. Every multiplier above
+#: one is gated behind machines the agent has to build and keep running, so a bigger number
+#: here is a harder thing to have done.
+ORE_VALUE: dict[str, float] = {
+    "sand": 0.3,
+    "scrap": 0.3,
+    "copper": 1.0,
+    "lead": 1.0,
+    "beryllium": 1.0,
+    "coal": 2.0,
+    "spore-pod": 4.0,
+    "graphite": 4.0,
+    "silicon": 5.0,
+    "metaglass": 5.0,
+    "titanium": 6.0,
+    "pyratite": 8.0,
+    "thorium": 12.0,
+    "plastanium": 15.0,
+    "blast-compound": 15.0,
+    "phase-fabric": 25.0,
+    "surge-alloy": 25.0,
+}
+
+#: Anything the table does not name is worth a copper. Erring low would quietly zero out
+#: whatever the game adds next, and a silent zero in a reward is the hardest kind of bug
+#: to see: the agent simply stops doing something, for no visible reason.
+_DEFAULT_ORE_VALUE = 1.0
+
+
+def _delivered_value(obs: Observation) -> float:
+    """Automated delivery, counted in copper-equivalents rather than in items."""
+    return sum(
+        int(amount) * ORE_VALUE.get(item, _DEFAULT_ORE_VALUE)
+        for item, amount in obs.get("produced", {}).items()
+    )
+
+
 def _produced(obs: Observation) -> int:
     """Items a machine delivered to the core.
 
@@ -220,8 +272,17 @@ def _produced(obs: Observation) -> int:
 
 
 def _variety(obs: Observation) -> int:
-    """How many different items a machine has delivered. Breadth, not volume."""
-    return sum(1 for amount in obs.get("produced", {}).values() if int(amount) > 0)
+    """How many different items a machine has delivered. Breadth, not volume.
+
+    Sand and scrap do not count towards it. The `two_ores` and `three_ores` milestones are
+    worth 20 and 30 points and are meant to say the agent runs more than one supply line;
+    a second drill dropped on a sand patch says nothing of the kind, and it was the
+    cheapest 20 points on the board.
+    """
+    return sum(
+        1 for item, amount in obs.get("produced", {}).items()
+        if int(amount) > 0 and ORE_VALUE.get(item, _DEFAULT_ORE_VALUE) >= 1.0
+    )
 
 
 def _crafting(obs: Observation) -> float:
@@ -251,7 +312,7 @@ def _consumed(before: Observation, after: Observation) -> float:
     conveyors carrying the same item forever would register transfers without end; it
     registers no work at all, because a loop has no consumer.
     """
-    delivered = _produced(after) - _produced(before)
+    delivered = _delivered_value(after) - _delivered_value(before)
     crafted = _crafting(after) - _crafting(before)
     # Power is deliberately NOT paid here, and the reason is worth keeping.
     #
@@ -319,18 +380,45 @@ class Milestone:
 #: [Crafter](https://arxiv.org/abs/2109.06780)'s reasoning: going from never mining
 #: automatically to doing it once matters, going from nine thousand ore to ten thousand
 #: does not.
+#: The most a single step may be credited as delivery, in items.
+#:
+#: A step is thirty ticks, half a second, and a conveyor hands over a few items in that
+#: time. Fifty is far above anything a working base of this era produces per step and far
+#: below what arrives when the engine moves a stockpile in one go.
+#:
+#: That distinction is not hypothetical. Measured across 237 archived episodes, 107 of
+#: them contained exactly one step where the core gained more than 150 items at once,
+#: median 1,194 and up to 5,251, including metaglass and graphite the agent has no way to
+#: make. Those single steps carried **22.1% of every point the run scored**, and in one
+#: traced case a windfall of 1,274 items paid 99.57 points on a step whose only action was
+#: to move: 80 of them milestones, crossing `automation`, `automation_100` and `two_ores`
+#: at a stroke. The ladder is meant to say "this agent built an economy". It was saying
+#: "this agent was handed one".
+DELIVERY_CAP = 50
+
+
+def _credited(obs: Observation) -> float:
+    """Delivery the ledger accepted, as opposed to delivery the counter reported."""
+    return float(obs.get("credited", 0.0))
+
+
+def _credited_variety(obs: Observation) -> int:
+    """Distinct ores that arrived at a rate a supply line could actually sustain."""
+    return int(obs.get("credited_variety", 0))
+
+
 MILESTONES: tuple[Milestone, ...] = (
     Milestone("first_drill", _placed("production"), 1, 5.0),
     Milestone("first_conveyor", _placed("distribution"), 1, 3.0),
     Milestone("first_wall", _placed("defense"), 1, 3.0),
     Milestone("first_turret", _placed("turret"), 1, 5.0),
     # The moment the whole project is about: ore arrived without a hand carrying it.
-    Milestone("automation", _produced, 1, 30.0),
-    Milestone("automation_100", _produced, 100, 30.0),
-    Milestone("automation_1k", _produced, 1_000, 60.0),
-    Milestone("automation_10k", _produced, 10_000, 60.0),
-    Milestone("two_ores", _variety, 2, 20.0),
-    Milestone("three_ores", _variety, 3, 30.0),
+    Milestone("automation", _credited, 1, 30.0),
+    Milestone("automation_100", _credited, 100, 30.0),
+    Milestone("automation_1k", _credited, 1_000, 60.0),
+    Milestone("automation_10k", _credited, 10_000, 60.0),
+    Milestone("two_ores", _credited_variety, 2, 20.0),
+    Milestone("three_ores", _credited_variety, 3, 30.0),
     Milestone("first_kill", _stat("enemy_units_destroyed"), 1, 20.0),
     Milestone("held_a_wave", _stat("enemy_units_destroyed"), 25, 30.0),
     Milestone("first_power", _placed("power"), 1, 15.0),
@@ -365,7 +453,7 @@ def _banked_by_hand(before: Observation, after: Observation) -> int:
     return max(0, stock - (_produced(after) - _produced(before)))
 
 
-def _build_and_hold() -> Callable[[Observation, Observation], float]:
+class _BuildAndHold:
     """Pay for the things a player does on the way to holding a sector.
 
     This replaces a potential function that measured how well placed the agent was and
@@ -410,27 +498,84 @@ def _build_and_hold() -> Callable[[Observation, Observation], float]:
     thirty held-out episodes at the old weights: the trained policy scored above a coward's
     ceiling and delivered nothing at all, while a random policy delivered more, because a
     lost core cost fifty against a plausible ten for a whole episode of production.
+
+    A ledger, and not a pure function, because of what the engine can hand over in a
+    single step. Delivery is read off a cumulative counter, and something in a generated
+    sector moves a whole stockpile into the core at once: 107 of 237 archived episodes
+    contained exactly one such step, median 1,194 items, up to 5,251, arriving with
+    metaglass and graphite the agent cannot make. It never happens to an idle agent, so
+    the agent triggers it, but nothing it built produced those goods.
+
+    Those steps carried 22.1% of every point the run scored. One traced case paid 99.57
+    points for a step whose only action was to move, 80 of them milestones, crossing
+    `automation`, `automation_100` and `two_ores` at a stroke. The ladder exists to say
+    that this agent built an economy; it was saying that this agent was handed one.
+
+    So the ledger credits at most `DELIVERY_CAP` items per step, and the automation and
+    variety milestones read the ledger rather than the counter. A windfall still pays a
+    little, because refusing it entirely would need to know exactly which engine event
+    causes it, and a rule that fires on the wrong thing is worse than a rule that pays a
+    capped trickle. What it can no longer do is buy a rung.
     """
 
-    def terms(before: Observation, after: Observation) -> dict[str, float]:
-        """The same reward, itemised.
+    def __init__(self) -> None:
+        self.last_terms: dict[str, float] = {}
+        self.reset()
 
-        This exists because a total is not diagnosable. Twice in one session a run was
-        misread from its score alone: once when a rising curve turned out to be an annuity
-        on a generator, and once when the source of a steady stream of points could not be
-        named without three separate probes against a live server. A number that cannot be
-        attributed is a number that gets believed.
+    def reset(self) -> None:
+        """Start a fresh episode. The ledger does not carry across one."""
+        self.credited = 0.0
+        self.varieties: set[str] = set()
+        self.last_terms = {}
 
-        Recorded per step in the replay, so any episode can be asked where its points came
-        from without re-running anything.
+    def _credit(self, before: Observation, after: Observation) -> tuple[float, float, set[str]]:
+        """What this step may be paid, without writing it down.
+
+        Returns the value to pay, the item count to add to the ledger, and the ores that
+        earned their place in it. Kept separate from recording so that `terms` can report
+        a step without advancing anything.
         """
-        delivered = _produced(after) - _produced(before)
+        items = _produced(after) - _produced(before)
+        value = _delivered_value(after) - _delivered_value(before)
+        if items <= 0:
+            return 0.0, 0.0, set()
+
+        if items > DELIVERY_CAP:
+            # Scaled rather than truncated, so a capped step is still paid in proportion
+            # to what arrived rather than at the price of whatever is alphabetically first.
+            return max(0.0, value) * (DELIVERY_CAP / items), float(DELIVERY_CAP), set()
+
+        seen = {
+            item for item, amount in (after.get("produced") or {}).items()
+            if int(amount) > int((before.get("produced") or {}).get(item, 0))
+            and ORE_VALUE.get(item, _DEFAULT_ORE_VALUE) >= 1.0
+        }
+        return max(0.0, value), float(items), seen
+
+    def _breakdown(self, before: Observation, after: Observation, paid: float,
+                   was: tuple[float, int], now: tuple[float, int]) -> dict[str, float]:
+        """The reward, itemised.
+
+        A total is not diagnosable. Twice in one session a run was misread from its score
+        alone: once when a rising curve turned out to be an annuity on a generator, and
+        once when a steady stream of points could not be attributed without three probes
+        against a live server.
+        """
+        # Both ends passed in explicitly. Reading `self` for the near end was a bug that
+        # cost the whole ladder: `__call__` advanced the ledger before asking for the
+        # breakdown, so both ends read the same number and nothing ever crossed a rung.
+        before_m = {**before, "credited": was[0], "credited_variety": was[1]}
+        after_m = {**after, "credited": now[0], "credited_variety": now[1]}
         crafted = _crafting(after) - _crafting(before)
         return {
-            "milestones": milestones(before, after),
-            "delivered": max(0.0, delivered) * 0.1,
+            "milestones": milestones(before_m, after_m),
+            "delivered": paid * 0.1,
             "crafted": max(0.0, crafted) * 0.5,
-            "hand": _banked_by_hand(before, after) * 0.002,
+            # Capped at what a unit can physically carry in one trip. Hand mining is one
+            # unit ferrying stacks, so a core gaining a thousand items in a single step is
+            # not hand mining whatever the arithmetic says; it is the same windfall the
+            # ledger above refuses to credit, arriving through the other door.
+            "hand": min(_banked_by_hand(before, after), 60) * 0.002,
             "carrying": _carrying(0.001)(before, after),
             "kills": (_stat("enemy_units_destroyed")(after)
                       - _stat("enemy_units_destroyed")(before)) * 2.0,
@@ -442,36 +587,33 @@ def _build_and_hold() -> Callable[[Observation, Observation], float]:
             "core_lost": -50.0 if before.get("has_core") and not after.get("has_core") else 0.0,
         }
 
-    def reward(before: Observation, after: Observation) -> float:
-        kills = _stat("enemy_units_destroyed")(after) - _stat("enemy_units_destroyed")(before)
-        lost = _stat("buildings_destroyed")(after) - _stat("buildings_destroyed")(before)
-        damage = float(before.get("core_health", 0.0)) - float(after.get("core_health", 0.0))
-        waves = _wave(after) - _wave(before)
+    def terms(self, before: Observation, after: Observation) -> dict[str, float]:
+        """The itemised reward for a step, without advancing the ledger.
 
-        return (
-            milestones(before, after)
-            # What the machines did, wherever they did it. Weighted so that an economy
-            # that works outearns one that merely survives: a base delivering a thousand
-            # ore is worth a hundred points against the fifty a lost core costs, where at
-            # the old weight the whole plausible production of an episode came to ten and
-            # not dying was worth five times playing.
-            + _consumed(before, after)
-            # A tenth of that for ore carried in by hand, and a little for picking it up at
-            # all. Without the second term the first thousand steps of a fresh policy carry
-            # no gradient whatsoever, because nothing at all happens.
-            + _banked_by_hand(before, after) * 0.002
-            + _carrying(0.001)(before, after)
-            # A turret that fires is a supply line that works, which is why this is worth
-            # more than a wave that passes on a timer.
-            + kills * 2.0
-            + lost * -0.5
-            + waves * 1.0
-            + max(0.0, damage) * -0.005
-            + (-50.0 if before.get("has_core") and not after.get("has_core") else 0.0)
+        Pure on purpose: the recorder and the tests both call it, and a reward that
+        charged itself twice per step because two callers looked at it would be a subtle
+        and very expensive bug.
+        """
+        paid, items, seen = self._credit(before, after)
+        return self._breakdown(
+            before, after, paid,
+            (self.credited, len(self.varieties)),
+            (self.credited + items, len(self.varieties | seen)),
         )
 
-    reward.terms = terms
-    return reward
+    def __call__(self, before: Observation, after: Observation) -> float:
+        paid, items, seen = self._credit(before, after)
+        was = (self.credited, len(self.varieties))
+        self.credited += items
+        self.varieties |= seen
+        self.last_terms = self._breakdown(
+            before, after, paid, was, (self.credited, len(self.varieties)))
+        return sum(self.last_terms.values())
+
+
+def _build_and_hold() -> _BuildAndHold:
+    return _BuildAndHold()
+
 
 #: Steps that fit before the first wave arrives on Ancient_Caldera.
 #: The wave lands at tick 14340 and a step is 30 ticks, so 450 decisions is the budget
