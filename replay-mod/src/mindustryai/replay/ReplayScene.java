@@ -2,7 +2,6 @@ package mindustryai.replay;
 
 import arc.math.Mathf;
 import arc.struct.IntMap;
-import arc.struct.IntSet;
 import mindustry.Vars;
 import mindustry.content.Blocks;
 import mindustry.entities.units.AIController;
@@ -51,7 +50,6 @@ public class ReplayScene {
     }
 
     private final IntMap<Puppet> puppets = new IntMap<>();
-    private final IntSet touched = new IntSet();
 
     /** The unit the agent was flying, so a viewer can tell it apart from the rest. */
     private int agent = -1;
@@ -130,19 +128,16 @@ public class ReplayScene {
     }
 
     private void applyUnits(ReplayFile.Scene scene) {
-        touched.clear();
-
         for (int index = 0; index < scene.unitCount(); index++) {
-            int id = scene.unit(index, 0);
-            touched.add(id);
+            int id = scene.unitInt(index, 0);
 
-            UnitType type = Vars.content.unit(scene.unit(index, 1));
+            UnitType type = Vars.content.unit(scene.unitInt(index, 1));
             if (type == null) {
                 continue;
             }
-            Team team = Team.get(scene.unit(index, 2));
-            float x = scene.unit(index, 3) * Vars.tilesize;
-            float y = scene.unit(index, 4) * Vars.tilesize;
+            Team team = Team.get(scene.unitInt(index, 2));
+            float x = scene.unitFloat(index, 3) * Vars.tilesize;
+            float y = scene.unitFloat(index, 4) * Vars.tilesize;
 
             Puppet puppet = puppets.get(id);
             if (puppet == null || puppet.unit == null || !puppet.unit.isAdded()
@@ -167,8 +162,8 @@ public class ReplayScene {
 
             puppet.toX = x;
             puppet.toY = y;
-            puppet.toRot = scene.unit(index, 5);
-            puppet.health = scene.unit(index, 6);
+            puppet.toRot = scene.unitFloat(index, 5);
+            puppet.health = scene.unitInt(index, 6);
             puppet.unit.health = puppet.unit.maxHealth() * puppet.health / 100f;
         }
     }
@@ -209,7 +204,10 @@ public class ReplayScene {
             puppet.unit.set(
                 Mathf.lerp(puppet.fromX, puppet.toX, t),
                 Mathf.lerp(puppet.fromY, puppet.toY, t));
-            puppet.unit.rotation = Mathf.slerpDelta(puppet.fromRot, puppet.toRot, 1f);
+            // Around the short way, and by the same fraction as the position. Passing a
+            // fixed factor here read as interpolation and was a jump to the new angle on
+            // the first frame of every step.
+            puppet.unit.rotation = Mathf.slerp(puppet.fromRot, puppet.toRot, t);
             // Zeroed every frame: a unit with velocity drifts away from where it was
             // recorded, slowly, and a replay that drifts is the thing being fixed.
             puppet.unit.vel.setZero();

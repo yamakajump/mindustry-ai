@@ -89,12 +89,21 @@ public class ReplayFile {
         public static final int FLAG_BUILDING = 2;
         public static final int FLAG_SHOOTING = 4;
 
-        public int[] units = EMPTY;
+        /**
+         * Kept as decimals, deliberately.
+         *
+         * <p>The bridge sends positions to a hundredth of a tile and an earlier reading
+         * rounded them to whole tiles here. That is up to half a tile of error on every
+         * unit, and worse than the error: all movement inside a tile disappears, so a
+         * flight becomes a sequence of jumps between tile centres however carefully the
+         * playback interpolates between steps.
+         */
+        public float[] units = NO_FLOATS;
         public int[] gone = EMPTY;
         public int[] placed = EMPTY;
         public int[] removed = EMPTY;
         public int[] hurt = EMPTY;
-        public int[] shots = EMPTY;
+        public float[] shots = NO_FLOATS;
         public int[] turrets = EMPTY;
         /** tile, blend, scale, count, then count times (item, x, y). Variable width. */
         public int[] belts = EMPTY;
@@ -105,12 +114,19 @@ public class ReplayFile {
             return units.length / UNIT;
         }
 
-        public int unit(int index, int field) {
+        /** A whole-number field: id, type, team, health percent, flags, mined tile, item. */
+        public int unitInt(int index, int field) {
+            return Math.round(units[index * UNIT + field]);
+        }
+
+        /** A position or an angle, which are the fields that must keep their decimals. */
+        public float unitFloat(int index, int field) {
             return units[index * UNIT + field];
         }
     }
 
     private static final int[] EMPTY = new int[0];
+    private static final float[] NO_FLOATS = new float[0];
     private static final String[] NO_STRINGS = new String[0];
 
     public String task = "";
@@ -309,18 +325,31 @@ public class ReplayFile {
         }
         Scene out = new Scene();
         out.agent = integer(scene, "agent", -1);
-        out.units = numbers(scene.get("units"));
+        out.units = decimals(scene.get("units"));
         out.gone = numbers(scene.get("gone"));
         out.placed = numbers(scene.get("placed"));
         out.removed = numbers(scene.get("removed"));
         out.hurt = numbers(scene.get("hurt"));
-        out.shots = numbers(scene.get("shots"));
+        out.shots = decimals(scene.get("shots"));
         out.turrets = numbers(scene.get("turrets"));
         out.belts = numbers(scene.get("belts"));
         return out;
     }
 
-    /** A flat JSON array of numbers, rounded to int. Positions are already in tiles. */
+    /** A flat JSON array of numbers that carry decimals, which positions and angles do. */
+    private static float[] decimals(Jval array) {
+        if (array == null || !array.isArray()) {
+            return NO_FLOATS;
+        }
+        int size = array.asArray().size;
+        float[] values = new float[size];
+        for (int i = 0; i < size; i++) {
+            values[i] = array.asArray().get(i).asFloat();
+        }
+        return values;
+    }
+
+    /** A flat JSON array of whole numbers: tile keys, identifiers, percentages. */
     private static int[] numbers(Jval array) {
         if (array == null || !array.isArray()) {
             return EMPTY;

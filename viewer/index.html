@@ -89,6 +89,7 @@
     <div class="row"><span>tick</span><span id="s-tick">0</span></div>
     <div class="row"><span>wave</span><span id="s-wave">0</span></div>
     <div class="row"><span>built</span><span id="s-built">0</span></div>
+    <div class="row"><span>units</span><span id="s-units">0</span></div>
     <h2>Reward</h2>
     <div class="row"><span>this step</span><span id="s-reward">0</span></div>
     <div class="row"><span>cumulative</span><span id="s-total">0</span></div>
@@ -203,22 +204,66 @@ async function load(buffer) {
     rotation,
   };
 
-  // Each frame's built set is derived once, by replaying the recorded actions in order.
-  // Actions carry the block identity, which the tile deltas alone would not.
+  // Each frame's world is derived once, by replaying the recorded scene deltas in order.
+  //
+  // The scene is what the recorder actually saw. Deriving the world from the agent's
+  // actions instead, which is what this did, says nothing about where the enemies were,
+  // what the turrets were shooting or what was riding the conveyors, so the picture was a
+  // plausible episode rather than the episode.
+  //
+  // Names are resolved here rather than at draw time because the header's palette only
+  // holds blocks that were on the map at step zero: a mechanical drill the agent builds
+  // later is absent from it, and present in the scene's own dictionary.
+  const names = Object.create(null);
+  for (const [id, entry] of Object.entries(header.palette || {})) names[id] = entry.name;
+  const unitTypes = Object.create(null);
+
+  const buildings = new Map();
+  let units = new Map();
   const built = new Map();
+
   for (const frame of frames) {
-    const act = frame.act;
-    if (act && act.t === "place") built.set(act.y * header.width + act.x, act);
-    if (act && act.t === "break") built.delete(act.y * header.width + act.x);
-    // A stamp is fifty placements reported as one action, so its cells are unpacked here.
-    // Without this a replay of a stamping agent shows an empty map while it builds, which
-    // is exactly what it showed for as long as the stamp existed.
-    if (act && act.t === "stamp") {
-      for (const [x, y, block, rotation] of act.cells || []) {
-        built.set(y * header.width + x, {t: "place", b: block, x, y, r: rotation});
+    const scene = frame.scene;
+    if (scene) {
+      for (const [id, entry] of Object.entries(scene.blocks || {})) names[id] = entry.name;
+      for (const [id, entry] of Object.entries(scene.types || {})) unitTypes[id] = entry;
+
+      const placed = scene.placed || [];
+      for (let i = 0; i + 6 <= placed.length; i += 6) {
+        buildings.set(placed[i], {b: names[placed[i + 1]], r: placed[i + 2],
+                                  team: placed[i + 3], health: placed[i + 4]});
+      }
+      for (const key of scene.removed || []) buildings.delete(key);
+
+      // Copied rather than mutated: seeking is random access, so every frame needs its
+      // own view of who was alive.
+      units = new Map(units);
+      const raw = scene.units || [];
+      for (let i = 0; i + 11 <= raw.length; i += 11) {
+        units.set(raw[i], {
+          type: unitTypes[raw[i + 1]], team: raw[i + 2],
+          x: raw[i + 3], y: raw[i + 4], rot: raw[i + 5],
+          health: raw[i + 6], flags: raw[i + 7], item: raw[i + 9], amount: raw[i + 10],
+        });
+      }
+      for (const id of scene.gone || []) units.delete(id);
+      if (scene.agent >= 0) frame.agent = scene.agent;
+    } else {
+      // Replays written before the scene existed. Actions only, which is all this reader
+      // ever had, and which it could never make faithful.
+      const act = frame.act;
+      if (act && act.t === "place") built.set(act.y * header.width + act.x, act);
+      if (act && act.t === "break") built.delete(act.y * header.width + act.x);
+      if (act && act.t === "stamp") {
+        for (const [x, y, block, rotation] of act.cells || []) {
+          built.set(y * header.width + x, {b: block, r: rotation});
+        }
       }
     }
-    frame.built = new Map(built);
+
+    frame.world = scene ? new Map(buildings) : new Map(built);
+    frame.who = units;
+    frame.shots = (scene && scene.shots) || [];
   }
 
   await loadAtlas();
@@ -337,12 +382,15 @@ function draw() {
   }
 
   if (frame) {
-    for (const [key, act] of frame.built) {
+    for (const [key, entry] of frame.world) {
       const x = key % width, y = Math.floor(key / width);
       if (x < minX || x > maxX || y < minY || y > maxY) continue;
-      const sprite = spriteIndex[act.b];
-      if (sprite) blit(sprite, x, y, sprite.tiles, act.r || 0);
+      const sprite = spriteIndex[entry.b];
+      if (sprite) blit(sprite, x, y, sprite.tiles, entry.r || 0);
     }
+
+    drawShots(frame, height);
+    drawUnits(frame, height);
   }
 
   const [cx, cy] = replay.core;
@@ -357,6 +405,59 @@ function draw() {
 }
 
 /** Whether this tile is where a multi-tile block should be drawn from. */
+// Mindustry's own team colours, so an enemy reads as an enemy at a glance.
+const TEAM_COLOUR = {0: "#4d4e58", 1: "#ffd37f", 2: "#f25555", 3: "#a27ce5", 4: "#54d67d",
+                     5: "#6c87fd"};
+
+function drawUnits(frame, height) {
+  if (!frame.who) return;
+  for (const [id, unit] of frame.who) {
+    const px = unit.x * TILE, py = (height - 1 - unit.y) * TILE;
+    const sprite = unit.type && spriteIndex[unit.type.name];
+    const size = (unit.type && unit.type.size ? unit.type.size : 1) * TILE;
+
+    if (sprite && sprite.image) {
+      ctx.save();
+      ctx.translate(px + TILE / 2, py + TILE / 2);
+      // Recorded rotation is degrees counted from east; the sprites point north.
+      ctx.rotate((90 - unit.rot) * Math.PI / 180);
+      ctx.drawImage(sprite.image, -size / 2, -size / 2, size, size);
+      ctx.restore();
+    } else {
+      // A type whose sprite is missing still has to appear: an invisible enemy is worse
+      // than an ugly one, and the whole point of recording the scene was to show them.
+      ctx.fillStyle = TEAM_COLOUR[unit.team] || "#ffffff";
+      ctx.beginPath();
+      ctx.arc(px + TILE / 2, py + TILE / 2, size / 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.strokeStyle = id === frame.agent ? "#ffffff" : (TEAM_COLOUR[unit.team] || "#fff");
+    ctx.lineWidth = (id === frame.agent ? 2 : 1) / camera.scale;
+    ctx.strokeRect(px, py, TILE, TILE);
+
+    if (unit.health < 100) {
+      ctx.fillStyle = "#f25555";
+      ctx.fillRect(px, py - 3 / camera.scale,
+                   TILE * unit.health / 100, 2 / camera.scale);
+    }
+  }
+}
+
+function drawShots(frame, height) {
+  const shots = frame.shots || [];
+  ctx.lineWidth = 2 / camera.scale;
+  for (let i = 0; i + 4 <= shots.length; i += 4) {
+    const px = shots[i] * TILE + TILE / 2, py = (height - 1 - shots[i + 1]) * TILE + TILE / 2;
+    const angle = shots[i + 2] * Math.PI / 180;
+    ctx.strokeStyle = TEAM_COLOUR[shots[i + 3]] || "#ffffff";
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    ctx.lineTo(px + Math.cos(angle) * TILE, py - Math.sin(angle) * TILE);
+    ctx.stroke();
+  }
+}
+
 function isCentre(x, y, index, id, size) {
   const half = Math.floor(size / 2);
   for (let dy = -half; dy <= half; dy++) {
@@ -382,7 +483,8 @@ function seek(index) {
   document.getElementById("s-step").textContent = frame.step;
   document.getElementById("s-tick").textContent = frame.tick;
   document.getElementById("s-wave").textContent = frame.wave;
-  document.getElementById("s-built").textContent = frame.built.size;
+  document.getElementById("s-built").textContent = frame.world.size;
+  document.getElementById("s-units").textContent = frame.who ? frame.who.size : 0;
   document.getElementById("s-reward").textContent = frame.reward.toFixed(3);
 
   let total = 0, refused = 0;
