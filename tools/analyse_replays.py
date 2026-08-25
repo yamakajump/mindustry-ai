@@ -121,8 +121,12 @@ def study(path: Path) -> dict:
     drills: list[tuple[int, int, str]] = []
     carriers: dict[tuple[int, int], int] = {}
     placed = Counter()
+    terms: dict[str, float] = {}
 
     for frame in frames:
+        for name, value in (frame.get("terms") or {}).items():
+            terms[name] = terms.get(name, 0.0) + float(value)
+
         action = frame.get("act")
         if action is None or action.get("t") != "place":
             continue
@@ -160,6 +164,7 @@ def study(path: Path) -> dict:
         "steps": len(frames),
         "drills": len(drills),
         "carriers": len(carriers),
+        "terms": terms,
         "adjacent": adjacent,
         "chains": chains,
         "touching": touching,
@@ -200,6 +205,25 @@ def main() -> None:
 
     print(f"{len(studied)} archived episodes under {args.root}")
     print()
+
+    # Measured, not reconstructed, and therefore printed first. Everything below this is
+    # inferred from what the agent asked to build; this is what it was actually paid.
+    totals: Counter = Counter()
+    itemised = 0
+    for episode in studied:
+        if episode["terms"]:
+            itemised += 1
+            totals.update(episode["terms"])
+    if itemised:
+        grand = sum(abs(v) for v in totals.values()) or 1.0
+        print(f"  where the points came from, over {itemised} itemised episode(s):")
+        for name, value in sorted(totals.items(), key=lambda kv: -abs(kv[1])):
+            print(f"    {name:<12} {value:12,.1f}  {100 * abs(value) / grand:5.1f}%")
+        print()
+    else:
+        print("  no episode carries a `terms` breakdown yet; they are written from the")
+        print("  run that recorded them onwards.")
+        print()
     print(f"  placed a drill at all           {sum(1 for e in studied if e['drills']):4d}"
           f"  ({sum(e['drills'] for e in studied):,} drills)")
     print(f"  a drill touching the core       {len(with_adjacent):4d}"
