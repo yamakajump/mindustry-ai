@@ -21,6 +21,10 @@ from torch import nn
 from gamma.net import PolicyNet
 
 
+#: The four choices one action is made of, in the order the network returns them.
+HEADS = ("type", "block", "position", "rotation")
+
+
 @dataclass
 class PPOConfig:
     """Defaults are CleanRL's, which are sane for a first run on a new environment."""
@@ -176,7 +180,8 @@ class PPO:
         size = batch // config.minibatches
         indices = np.arange(batch)
 
-        stats = {"policy_loss": 0.0, "value_loss": 0.0, "entropy": 0.0, "clip_fraction": 0.0,
+        stats = {**{f"entropy_{name}": 0.0 for name in HEADS},
+                 "policy_loss": 0.0, "value_loss": 0.0, "entropy": 0.0, "clip_fraction": 0.0,
                  "reward_scale": float(np.sqrt(self.scale.var)) if config.normalise_rewards else 1.0}
         passes = 0
 
@@ -185,10 +190,10 @@ class PPO:
             for start in range(0, batch, size):
                 chunk = indices[start:start + size]
 
-                _, log_prob, entropy, value = self.net.act(
+                _, log_prob, entropy, value, spread = self.net.act(
                     b_spatial[chunk], b_globals[chunk],
                     {k: v[chunk] for k, v in b_masks.items()},
-                    action=b_actions[chunk],
+                    action=b_actions[chunk], per_head=True,
                 )
 
                 ratio = (log_prob - b_log_probs[chunk]).exp()
@@ -226,6 +231,8 @@ class PPO:
                 stats["policy_loss"] += policy_loss.item()
                 stats["value_loss"] += value_loss.item()
                 stats["entropy"] += entropy_loss.item()
+                for name, value_ in zip(HEADS, spread.tolist()):
+                    stats[f"entropy_{name}"] += value_
                 passes += 1
 
         self.updates += 1

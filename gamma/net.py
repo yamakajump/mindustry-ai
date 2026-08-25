@@ -153,7 +153,8 @@ class PolicyNet(nn.Module):
         globals_: torch.Tensor,
         masks: dict[str, torch.Tensor],
         action: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        per_head: bool = False,
+    ) -> tuple[torch.Tensor, ...]:
         """Sample or evaluate a full action.
 
         Returns the action, the summed log probability, the summed entropy and the value.
@@ -178,6 +179,15 @@ class PolicyNet(nn.Module):
         log_prob = sum(head.log_prob(pick) for head, pick in zip(heads, picks))
         entropy = sum(head.entropy() for head in heads)
         value = self.head_value(features).squeeze(-1)
+
+        if per_head:
+            # The summed entropy is what PPO optimises, and it is nearly useless as a
+            # diagnostic: the position head ranges over the whole window, so its ln(2304)
+            # swamps ln(6) for the type and ln(4) for the rotation. A policy that has
+            # learnt exactly what to build and nothing about where to put it moves the
+            # total by a few hundredths, which reads as a policy that has learnt nothing.
+            spread = torch.stack([head.entropy().mean() for head in heads])
+            return torch.stack(picks, dim=1), log_prob, entropy, value, spread
 
         return torch.stack(picks, dim=1), log_prob, entropy, value
 

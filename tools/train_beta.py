@@ -766,7 +766,12 @@ def main() -> None:
             f"update {agent.updates:4d}  steps {total_steps:>8,}  "
             f"{total_steps / elapsed:6.1f}/s  lr {lr:.2e}  "
             f"policy {stats['policy_loss']:+.4f}  value {stats['value_loss']:.4f}  "
-            f"entropy {stats['entropy']:.3f}  scale {stats['reward_scale']:.2f}  "
+            # Per head, because the summed entropy hides everything. The position head
+            # ranges over 2,304 tiles and its ln swamps the ln(6) of the type, so a policy
+            # that has learnt exactly what to build and nothing about where reads as flat.
+            f"H[t {stats['entropy_type']:.2f} b {stats['entropy_block']:.2f} "
+            f"p {stats['entropy_position']:.2f} r {stats['entropy_rotation']:.2f}]  "
+            f"scale {stats['reward_scale']:.2f}  "
             f"episodes {snapshot['episodes']}  solved {snapshot['solved']}",
             flush=True,
         )
