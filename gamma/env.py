@@ -431,11 +431,11 @@ class MindustryEnv(gym.Env):
         # episode being refused. Measured on a random policy, an unmasked type head
         # produced 98 refusals out of 120 once the starting copper ran out.
         if not self.embodied:
-            type_mask = np.array(
-                [True, bool(block_mask.any() and free.any()), bool(owned.any())],
-                dtype=bool,
-            )
-            return {"type": type_mask, "block": block_mask, "position": free}
+            legal = [True, bool(block_mask.any() and free.any()), bool(owned.any())]
+            if self.designs:
+                legal.append(bool(block_mask.any() and free.any()))
+            return {"type": np.array(legal, dtype=bool),
+                    "block": block_mask, "position": free}
 
         unit = obs.get("unit", {})
         carrying = int(unit.get("carrying", 0))
@@ -456,20 +456,34 @@ class MindustryEnv(gym.Env):
         mineable &= channel("block") == 0
         mineable &= carrying < capacity
 
-        type_mask = np.array(
-            [
-                True,                                   # noop
-                True,                                   # move, always available
-                bool(block_mask.any() and free.any()),  # build
-                bool(mineable.any()),                   # mine
-                carrying > 0,                           # unload, pointless when empty
-                bool(owned.any()),                      # break
-            ],
-            dtype=bool,
-        )
+        legal = [
+            True,                                   # noop
+            True,                                   # move, always available
+            bool(block_mask.any() and free.any()),  # build
+            bool(mineable.any()),                   # mine
+            carrying > 0,                           # unload, pointless when empty
+            bool(owned.any()),                      # break
+        ]
+
+        # The stamp, which was missing, and its absence was not a detail.
+        #
+        # `action_types` grows a seventh entry as soon as a design is loaded, but this
+        # mask stopped at six, and the network takes its type count from the mask. So the
+        # head had six outputs and index six was unreachable: measured over 54 recent
+        # episodes, zero stamps in 39,456 actions. Not a choice the policy made, an option
+        # it never had.
+        #
+        # That matters more than a missing action. Laying a structure in one decision is
+        # the whole answer to the problem this project keeps hitting, which is that a
+        # conveyor line placed one tile at a time never gets finished: 5,719 conveyors
+        # across 177 archived episodes and one line that ever met end to end. The
+        # mechanism built for it, the designs and the forge that breeds them, has been
+        # switched off the entire time while every run passed --designs.
+        if self.designs:
+            legal.append(bool(block_mask.any() and free.any()))
 
         return {
-            "type": type_mask,
+            "type": np.array(legal, dtype=bool),
             "block": block_mask,
             "position": free,
             "mineable": mineable,

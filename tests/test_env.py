@@ -40,7 +40,10 @@ def test_step_returns_the_gym_five_tuple(env: MindustryEnv) -> None:
 def test_masks_cover_every_head(env: MindustryEnv) -> None:
     _, info = env.reset()
     mask = info["action_mask"]
-    assert mask["type"].shape == (len(ACTION_TYPES),)
+    # Against `env.action_types` and not the module constant, which is what let a whole
+    # action type go missing. The list grows a `stamp` entry as soon as a design is
+    # loaded; the mask did not, and the network takes its type count from the mask.
+    assert mask["type"].shape == (len(env.action_types),)
     assert mask["block"].shape == (len(env.blocks),)
     assert mask["position"].ndim == 2
     assert mask["type"][ACTION_TYPES.index("noop")], "doing nothing is always legal"
@@ -105,3 +108,32 @@ def test_alpha_beats_random_on_t1(env: MindustryEnv) -> None:
     assert scripted["reward"] > chaotic["reward"]
     assert scripted["applied"] > chaotic["applied"]
     assert scripted["items"].get("copper", 0) > chaotic["items"].get("copper", 0)
+
+
+def test_a_loaded_design_is_reachable(env: MindustryEnv) -> None:
+    """A design the policy cannot choose is a design that does not exist.
+
+    `action_types` grows a `stamp` entry as soon as a design is loaded and the mask did
+    not, so the head had six outputs while the environment named seven and the seventh was
+    unreachable. Measured over 54 archived episodes: zero stamps in 39,456 actions. Not a
+    choice the policy made, an option it never had, on every run that passed --designs.
+
+    It is the mechanism built for the problem the project keeps hitting, which is that a
+    conveyor line placed one tile at a time never gets finished: 5,719 conveyors across
+    177 episodes and one line that ever met end to end.
+    """
+    from gamma.env import STAMP
+    from gamma.library import load as load_designs
+
+    designs = tuple(load_designs(Path("docs/designs.json")))
+    assert designs, "no design to test with"
+
+    was = env.designs
+    try:
+        env.designs = designs
+        _, info = env.reset()
+        types = env.action_types
+        assert STAMP in types
+        assert info["action_mask"]["type"].shape == (len(types),)
+    finally:
+        env.designs = was
