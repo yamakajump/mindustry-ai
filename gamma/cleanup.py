@@ -32,10 +32,12 @@ _POWERSHELL_LIST = (
     "ForEach-Object { \"$($_.ProcessId) $($_.CommandLine)\" }"
 )
 
-_POWERSHELL_BUSY_PORTS = (
-    "Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue | "
-    "Select-Object -ExpandProperty LocalPort -Unique"
-)
+#: `netstat` rather than `Get-NetTCPConnection`, which is the obvious cmdlet and does not
+#: work here. Asked for established connections it returned 301 of them while omitting the
+#: bridge ports entirely, and `netstat -ano` listed those same ports as ESTABLISHED on the
+#: same machine at the same second. A safety check that silently sees nothing is worse
+#: than no safety check at all, because it reads as a green light.
+_BUSY = re.compile(r"^\s*TCP\s+\S+:(\d+)\s+\S+\s+ESTABLISHED", re.MULTILINE)
 
 _PORT = re.compile(r"-Dmindustryai\.port=(\d+)")
 
@@ -45,7 +47,7 @@ def find_servers() -> list[tuple[int, int | None]]:
     if sys.platform == "win32":
         result = subprocess.run(
             ["powershell", "-NoProfile", "-Command", _POWERSHELL_LIST],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, errors="replace", timeout=30,
         )
         found = []
         for line in result.stdout.splitlines():
@@ -56,7 +58,7 @@ def find_servers() -> list[tuple[int, int | None]]:
         return found
 
     result = subprocess.run(
-        ["pgrep", "-af", "server-release.jar"], capture_output=True, text=True, timeout=30
+        ["pgrep", "-af", "server-release.jar"], capture_output=True, text=True, errors="replace", timeout=30
     )
     found = []
     for line in result.stdout.splitlines():
@@ -71,14 +73,13 @@ def busy_ports() -> set[int]:
     """Ports with a connection on them right now, so a server holding one is in use."""
     try:
         if sys.platform == "win32":
-            result = subprocess.run(
-                ["powershell", "-NoProfile", "-Command", _POWERSHELL_BUSY_PORTS],
-                capture_output=True, text=True, timeout=30,
-            )
-        else:
-            result = subprocess.run(["ss", "-Htan", "state", "established"],
-                                    capture_output=True, text=True, timeout=30)
-        return {int(tok) for tok in re.findall(r"(\d{4,5})", result.stdout)}
+            result = subprocess.run(["netstat", "-ano"],
+                                    capture_output=True, text=True, errors="replace", timeout=30)
+            return {int(port) for port in _BUSY.findall(result.stdout)}
+
+        result = subprocess.run(["ss", "-Htan", "state", "established"],
+                                capture_output=True, text=True, errors="replace", timeout=30)
+        return {int(port) for port in re.findall(r":(\d+)\s", result.stdout)}
     except Exception:
         # Unable to tell who is in use, so nothing is safe to kill. Erring the other way
         # is what took a training run down.
@@ -99,6 +100,18 @@ def kill_servers(verbose: bool = True, force: bool = False) -> int:
 
     if not force:
         in_use = busy_ports()
+        if not in_use:
+            # Seeing nothing is not the same as there being nothing, and the difference
+            # is a training run. `netstat` on a French Windows emits bytes cp1252 cannot
+            # decode, the reader thread raised, stdout came back empty, and this read it
+            # as "no server is busy" and killed all twenty-five. Refusing to act on an
+            # empty answer is the only safe reading: a real machine with servers running
+            # always has something connected somewhere.
+            if verbose:
+                print("cannot tell which servers are in use, refusing to kill any; "
+                      "pass --force if you really mean all of them")
+            return 0
+
         spared = [(pid, port) for pid, port in servers if port in in_use]
         servers = [(pid, port) for pid, port in servers if port not in in_use]
         if spared and verbose:
