@@ -204,16 +204,36 @@ class EnvWorker:
         return LocalWindow(inner, size=self.args.window, channels=self.args.channels), task
 
     def _archive_episode(self, state, reward: float, solved: bool) -> None:
-        """Seal the recording, rank it, and point the next one at a fresh file."""
+        """Seal the recording, rank it, and point the next one at a fresh file.
+
+        Nothing in here is allowed to take the environment down with it. A replay is a
+        side artefact: it is read afterwards, by people and by tools, and losing one costs
+        an episode of hindsight and nothing else. An environment is hours of training.
+
+        Windows makes this concrete. Renaming or deleting a file another process has open
+        raises PermissionError, and the archive both renames and prunes, so anything that
+        reads the archive while a run is going can collide with it. Something did, and the
+        environment died of it, and at the time a dead environment ended the entire run:
+        608,256 steps of a five million step budget, gone, with exit code zero.
+        """
         if self.archive is None or self.recorder is None:
             return
 
-        self.recorder.finish()
-        if self.archive.commit(self.episode, reward, solved) is None:
-            self.archive.discard(self.episode)
+        try:
+            self.recorder.finish()
+            if self.archive.commit(self.episode, reward, solved) is None:
+                self.archive.discard(self.episode)
+        except OSError as error:
+            print(f"env {self.index}: could not archive episode {self.episode}, "
+                  f"carrying on: {error!r}", flush=True)
+
         self.episode += 1
-        self.recorder.path = self.archive.pending(self.episode)
-        state.replays = self.archive.listing()
+        try:
+            self.recorder.path = self.archive.pending(self.episode)
+            state.replays = self.archive.listing()
+        except OSError as error:
+            print(f"env {self.index}: archive unreadable, recording paused: {error!r}",
+                  flush=True)
 
     def _capture_scene(self, env, state, force: bool = False) -> None:
         """Fetch what moved and fold it into the match, on a wall-clock schedule."""
@@ -677,9 +697,16 @@ def main() -> None:
                 dones.append(float(done))
 
             if casualties:
+                dead = {id(worker) for worker in casualties}
                 for worker in casualties:
                     print(f"dropping env {worker.index}", flush=True)
                     monitor.match(worker.index).alive = False
+                # Drop the dead slots from this step's lists too, or the survivors are
+                # renumbered against observations that still belong to the dead.
+                keep = [i for i, worker in enumerate(alive) if id(worker) not in dead]
+                observations = [observations[i] for i in keep]
+                infos = [infos[i] for i in keep]
+                alive = [alive[i] for i in keep]
                 break
 
             buffer.rewards[step] = torch.as_tensor(rewards, device=device, dtype=torch.float32)
@@ -687,16 +714,30 @@ def main() -> None:
             total_steps += n_envs
 
         if len(alive) != n_envs or any(w.failed for w in alive):
-            alive = [w for w in alive if w.failed is None]
+            # It used to print "continuing with N environments" and then shut every worker
+            # down and leave the loop, which is the opposite of continuing. A single
+            # environment dying ended the whole run, and because the message said the
+            # opposite and the exit code was zero, it read as a run that had finished. One
+            # did: it stopped at 608,256 steps of a five million step budget, 12% of it,
+            # killed by a Windows file lock on a replay while it was being archived.
+            #
+            # Continuing for real costs nothing here. The rollout buffer is rebuilt from
+            # `n_envs` at the top of every iteration, and the network has no idea how many
+            # environments feed it, so the only thing to repair is the bookkeeping.
+            keep = [i for i, worker in enumerate(alive) if worker.failed is None]
+            observations = [observations[i] for i in keep]
+            infos = [infos[i] for i in keep]
+            alive = [alive[i] for i in keep]
             if not alive:
-                print("every environment died, stopping")
+                print("every environment died, stopping", flush=True)
                 break
-            print(f"continuing with {len(alive)} environments")
             n_envs = len(alive)
-            first = []
-            for worker in alive:
-                worker.requests.put(None)
-            break
+            # The half-collected rollout goes in the bin. A rollout is a fixed number of
+            # steps from a fixed number of environments; there is no honest way to train
+            # on one that changed width halfway through.
+            print(f"continuing with {n_envs} environments, discarding the partial rollout",
+                  flush=True)
+            continue
 
         with torch.no_grad():
             last_value = agent.net.value(
