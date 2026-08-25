@@ -415,13 +415,18 @@ function drawUnits(frame, height) {
     const px = unit.x * TILE, py = (height - 1 - unit.y) * TILE;
     const sprite = unit.type && spriteIndex[unit.type.name];
     const size = (unit.type && unit.type.size ? unit.type.size : 1) * TILE;
+    // Resolved the same way blocks are, through the lazy loader, because a sprite entry
+    // is a description and not an image. Reading a field off it that does not exist is
+    // silent: every unit fell back to a coloured circle and the fallback looked deliberate.
+    const image = sprite ? imageOf(frameOf(sprite, unit.y * replay.width + unit.x)) : null;
 
-    if (sprite && sprite.image) {
+    if (image) {
       ctx.save();
       ctx.translate(px + TILE / 2, py + TILE / 2);
-      // Recorded rotation is degrees counted from east; the sprites point north.
+      // Recorded rotation is degrees counted from east; unit sprites are drawn pointing
+      // up, so the canvas turn is ninety degrees off the recorded angle.
       ctx.rotate((90 - unit.rot) * Math.PI / 180);
-      ctx.drawImage(sprite.image, -size / 2, -size / 2, size, size);
+      ctx.drawImage(image, -size / 2, -size / 2, size, size);
       ctx.restore();
     } else {
       // A type whose sprite is missing still has to appear: an invisible enemy is worse
