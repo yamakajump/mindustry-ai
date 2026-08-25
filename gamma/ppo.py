@@ -192,7 +192,7 @@ class PPO:
         size = batch // config.minibatches
         indices = np.arange(batch)
 
-        stats = {"grad_policy": 0.0, "grad_entropy": 0.0,
+        stats = {"grad_policy": 0.0, "grad_entropy": 0.0, "grad_total": 0.0,
                  **{f"entropy_{name}": 0.0 for name in HEADS},
                  "policy_loss": 0.0, "value_loss": 0.0, "entropy": 0.0, "clip_fraction": 0.0,
                  "reward_scale": float(np.sqrt(self.scale.var)) if config.normalise_rewards else 1.0}
@@ -249,7 +249,13 @@ class PPO:
 
                 self.optimiser.zero_grad()
                 loss.backward()
-                nn.utils.clip_grad_norm_(self.net.parameters(), config.max_grad_norm)
+                # The return value is the norm BEFORE clipping, which is free to keep and
+                # says how much of each update is being thrown away. A run whose gradient
+                # is routinely several times the ceiling is taking the same size step in a
+                # direction it barely controls, every time.
+                before_clip = nn.utils.clip_grad_norm_(
+                    self.net.parameters(), config.max_grad_norm)
+                stats["grad_total"] += float(before_clip)
                 self.optimiser.step()
 
                 with torch.no_grad():
