@@ -209,6 +209,17 @@ class ReplayRecorder:
                 # episode never pays anything into the core, so it cannot afford the
                 # blocks it went on to build and the replay diverges from what happened.
                 frame["act"] = {"t": "unload"}
+            elif kind == "stamp":
+                # A whole structure in one decision, so the frame carries how much of it
+                # the world actually accepted. `asked` against `laid` is the difference
+                # between a design the policy placed well and one it dropped on a wall.
+                frame["act"] = {
+                    "t": "stamp",
+                    "d": int(outcome.get("design", 0)),
+                    "x": int(outcome.get("x", 0)), "y": int(outcome.get("y", 0)),
+                    "laid": int(outcome.get("laid", 0)),
+                    "asked": int(outcome.get("asked", 0)),
+                }
         return frame
 
     def finish(self) -> None:

@@ -143,6 +143,9 @@ class MindustryEnv(gym.Env):
         #: was being encoded, sent and decoded than anybody ever looked at.
         self.window = int(window)
 
+        #: Set by `_stamp` for the step it happened on, so a replay can show it.
+        self._last_stamp: dict[str, Any] | None = None
+
         self._dir = setup_server(server_dir or f"mindustry-env-{bridge_port}")
         if jar is not None:
             install_plugin(self._dir, jar)
@@ -374,9 +377,22 @@ class MindustryEnv(gym.Env):
         cells += route(anchor, core)
         cells.sort(key=lambda cell: 0 if "drill" in cell[2] else 1)
 
+        laid = 0
         for x, y, block, rotation in cells:
-            bridge.act({"type": "build" if self.embodied else "place",
-                        "block": block, "x": x, "y": y, "rotation": rotation})
+            outcome = bridge.act({"type": "build" if self.embodied else "place",
+                                  "block": block, "x": x, "y": y, "rotation": rotation})
+            laid += bool((outcome.get("action") or {}).get("applied"))
+
+        # Reported, because a stamp applies outside the step protocol and therefore
+        # produced no outcome at all. The recorder only writes an action it can see
+        # applied, so stamps were invisible in every replay: after the type head was
+        # widened to reach them, the archives still showed zero, and the only way to tell
+        # "never chosen" from "never recorded" was to read the shape of the network.
+        self._last_stamp = {
+            "applied": laid > 0, "type": STAMP,
+            "design": int(action[1]) % len(self.designs),
+            "x": anchor[0], "y": anchor[1], "laid": laid, "asked": len(cells),
+        }
 
     def _decode(self, action: np.ndarray) -> dict[str, Any] | None:
         kind = self.action_types[int(action[0])]
@@ -389,6 +405,7 @@ class MindustryEnv(gym.Env):
             # placements and the step protocol carries one.
             self._stamp(action)
             return None
+
         if kind in ("place", "build"):
             return {
                 "type": kind,
@@ -518,8 +535,12 @@ class MindustryEnv(gym.Env):
     ) -> tuple[dict[str, np.ndarray], float, bool, bool, dict[str, Any]]:
         bridge = self._ensure_started()
 
+        self._last_stamp = None
         raw = bridge.step(repeat=self.task.ticks_per_step, action=self._decode(action))
         self._steps += 1
+        if self._last_stamp is not None:
+            # A stamp leaves no outcome in `raw`, having been applied before the tick.
+            raw = {**raw, "action": self._last_stamp}
 
         reward = self.task.reward(self._last_obs, raw)
         won = self.task.succeeded(raw)
