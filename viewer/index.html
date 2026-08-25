@@ -210,6 +210,14 @@ async function load(buffer) {
     const act = frame.act;
     if (act && act.t === "place") built.set(act.y * header.width + act.x, act);
     if (act && act.t === "break") built.delete(act.y * header.width + act.x);
+    // A stamp is fifty placements reported as one action, so its cells are unpacked here.
+    // Without this a replay of a stamping agent shows an empty map while it builds, which
+    // is exactly what it showed for as long as the stamp existed.
+    if (act && act.t === "stamp") {
+      for (const [x, y, block, rotation] of act.cells || []) {
+        built.set(y * header.width + x, {t: "place", b: block, x, y, r: rotation});
+      }
+    }
     frame.built = new Map(built);
   }
 

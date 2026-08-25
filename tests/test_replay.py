@@ -78,13 +78,27 @@ def test_frames_carry_the_timeline(recorded: Path) -> None:
     assert frames[-1]["tick"] > frames[0]["tick"]
 
 
-def test_blocks_are_stored_as_deltas(recorded: Path) -> None:
-    """Storing the full tensor per step would cost about 413 MB an episode."""
+def test_what_was_built_is_recoverable_from_the_actions(recorded: Path) -> None:
+    """Storing the full tensor per step would cost about 413 MB an episode.
+
+    It used to be stored as a tile diff of the observation's ally-block channel. That
+    channel became a forty-eight tile window around a moving agent when the bridge started
+    cropping, so the map slid under the diff and every step reported the whole window as
+    built and unbuilt at once: 67,896 tiles appearing and 67,766 disappearing per episode,
+    for 3,191 blocks actually asked for.
+
+    Nothing read it. What stands is derived by replaying the recorded actions, which is
+    what the viewer always did and which no coordinate system can invalidate.
+    """
     _, records = read(recorded)
     frames = [r for r in records if r["type"] == "frame"]
-    assert any("added" in f for f in frames), "no construction was recorded"
-    # No frame should carry the whole map; deltas are small by construction.
-    assert max(len(f.get("added", [])) for f in frames) < 100
+
+    assert not any("added" in f or "removed" in f for f in frames), (
+        "tile diffs are back, and they cannot be read once the observation is a window"
+    )
+    assert any(f.get("act", {}).get("t") in ("place", "stamp") for f in frames), (
+        "no construction was recorded, so nothing can be reconstructed from it"
+    )
 
 
 def test_replay_stays_small(recorded: Path) -> None:

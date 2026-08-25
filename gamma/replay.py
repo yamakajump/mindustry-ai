@@ -46,7 +46,6 @@ class ReplayRecorder:
         self.path = Path(path)
         self.note = note
         self._file: gzip.GzipFile | None = None
-        self._previous: np.ndarray | None = None
         self._previous_raw: dict[str, Any] | None = None
         self._step = 0
 
@@ -59,9 +58,6 @@ class ReplayRecorder:
     def _write(self, record: dict[str, Any]) -> None:
         assert self._file is not None
         self._file.write((json.dumps(record, separators=(",", ":")) + "\n").encode("utf-8"))
-
-    def _channel(self, spatial: np.ndarray, name: str) -> np.ndarray:
-        return spatial[self.env._bridge.channels.index(name)]
 
     # Recording -------------------------------------------------------------------
 
@@ -114,7 +110,6 @@ class ReplayRecorder:
             "rotation": _encode_bytes(planes[tiles * 6:tiles * 7]),
         })
 
-        self._previous = self._channel(spatial, "block_ally").copy()
         self._write(self._frame(raw, reward=0.0))
         return observation, info
 
@@ -139,21 +134,19 @@ class ReplayRecorder:
         outcome: dict | None = None,
         action: Any = None,
     ) -> dict:
-        current = self._channel(raw["spatial"], "block_ally")
-        added: list[list[int]] = []
-        removed: list[list[int]] = []
-
-        if self._previous is not None and self._previous.shape != current.shape:
-            # The map changed size under the recording, which the environment refuses on
-            # the next reset. Nothing here can salvage the file, but the diff is not the
-            # place to report it: a broadcast error from a delta hides the actual fault.
-            self._previous = None
-
-        if self._previous is not None:
-            changed = np.argwhere(current != self._previous)
-            for y, x in changed:
-                (added if current[y, x] else removed).append([int(x), int(y)])
-        self._previous = current.copy()
+        # The tile diff is gone, and its removal is the point rather than a tidy-up.
+        #
+        # It compared the ally-block channel of the observation between two steps. Since
+        # the bridge started sending a window instead of the whole map, that channel is
+        # forty-eight tiles around an agent that moves, so it slides under the diff and
+        # every step reports the entire window as built and unbuilt at once. Measured
+        # over 35 episodes: 67,896 tiles appearing and 67,766 disappearing per episode,
+        # for 3,191 blocks actually asked for.
+        #
+        # Nothing read it. The viewer derives what stands by replaying the recorded
+        # actions, which is coordinate-system independent and was always the better
+        # source. So this was tens of thousands of wrong coordinates per episode, and
+        # they cost more than the actions they were meant to supplement.
 
         # Where the points came from, not just how many. A total is not diagnosable: a
         # rising curve was once an annuity on a generator, and tracking down a steady
@@ -179,10 +172,6 @@ class ReplayRecorder:
         }
         if itemised:
             frame["terms"] = itemised
-        if added:
-            frame["added"] = added
-        if removed:
-            frame["removed"] = removed
         if outcome is not None and not outcome.get("applied", True):
             frame["refused"] = 1
 
@@ -219,6 +208,7 @@ class ReplayRecorder:
                     "x": int(outcome.get("x", 0)), "y": int(outcome.get("y", 0)),
                     "laid": int(outcome.get("laid", 0)),
                     "asked": int(outcome.get("asked", 0)),
+                    "cells": outcome.get("cells") or [],
                 }
         return frame
 

@@ -392,6 +392,10 @@ class MindustryEnv(gym.Env):
             "applied": laid > 0, "type": STAMP,
             "design": int(action[1]) % len(self.designs),
             "x": anchor[0], "y": anchor[1], "laid": laid, "asked": len(cells),
+            # The cells themselves, because a viewer derives what stands from the actions
+            # it was given and a stamp is fifty placements reported as one. Without them a
+            # replay of a stamping agent shows an empty map while it builds.
+            "cells": [[x, y, block, rotation] for x, y, block, rotation in cells],
         }
 
     def _decode(self, action: np.ndarray) -> dict[str, Any] | None:
