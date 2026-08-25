@@ -172,7 +172,25 @@ class MindustryEnv(gym.Env):
 
         self._server = ServerProcess(
             self._dir,
-            jvm_args=[f"-Dmindustryai.port={self.bridge_port}"],
+            jvm_args=[
+                f"-Dmindustryai.port={self.bridge_port}",
+                # Two dozen servers share one machine, and by default each one sizes its
+                # thread pools from `availableProcessors()`, which reports every logical
+                # core on the box. Measured on a live run: 29 JVMs holding 1,897 threads
+                # between them, 65 apiece, on 32 logical processors. Nearly all of that is
+                # GC and JIT workers for a machine each server believes it owns alone, and
+                # they contend against the one thread that actually simulates the world.
+                "-XX:ActiveProcessorCount=2",
+                # Serial collection follows from the same fact. Parallel GC exists to
+                # spend several cores to shorten a pause; here there are no spare cores to
+                # spend, and the pause is one server's alone.
+                "-XX:+UseSerialGC",
+                # A default heap is a quarter of physical memory, so each of these was
+                # entitled to 23 GB and none needs it. Bounding it keeps the live set
+                # small enough to stay in cache instead of sprawling across 93 GB.
+                "-Xms256m",
+                "-Xmx1g",
+            ],
             port=self.game_port,
         )
         self._server.__enter__()
