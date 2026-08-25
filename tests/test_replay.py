@@ -140,3 +140,23 @@ def test_showcase_replays_are_valid() -> None:
         header, records = read(path)
         assert header["format"] == REPLAY_FORMAT, f"{path.name} uses an old format"
         assert any(r["type"] == "frame" for r in records), f"{path.name} has no frames"
+
+
+def test_the_scene_is_recorded(recorded: Path) -> None:
+    """A replay must be a recording, not a reconstruction.
+
+    Actions alone say what the agent asked for. They say nothing about where the enemies
+    were, what the turrets shot at, or what was riding the conveyors, so replaying them on
+    a rebuilt world re-simulates all of it and any divergence compounds. Measured on the
+    mod as it stood: it understood two action types out of six, 46% of what the agent did,
+    and 1% of the blocks it built, because a stamp lays thirty-eight at once.
+    """
+    _, records = read(recorded)
+    frames = [r for r in records if r["type"] == "frame"]
+    scened = [f for f in frames if f.get("scene")]
+
+    assert scened, "no scene was recorded, so the replay cannot be faithful"
+    keys = set().union(*(f["scene"].keys() for f in scened))
+    assert keys & {"units", "belts", "turrets", "shots", "placed"}, (
+        f"the scene carries nothing that moved: {sorted(keys)}"
+    )

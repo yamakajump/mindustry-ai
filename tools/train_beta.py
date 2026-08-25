@@ -235,8 +235,18 @@ class EnvWorker:
             print(f"env {self.index}: archive unreadable, recording paused: {error!r}",
                   flush=True)
 
-    def _capture_scene(self, env, state, force: bool = False) -> None:
-        """Fetch what moved and fold it into the match, on a wall-clock schedule."""
+    def _capture_scene(self, env, state, force: bool = False, scene: dict | None = None) -> None:
+        """Fold what moved into the match, on a wall-clock schedule.
+
+        The delta is handed in rather than fetched whenever a recorder is running, because
+        `scene()` returns everything that changed *since the last call*: two consumers
+        asking independently each get half of what happened, and neither can tell that it
+        is looking at half.
+        """
+        if scene is not None:
+            state.scene.apply(scene)
+            return
+
         now = time.monotonic()
         if not force and now - self.scene_at < self.scene_interval:
             return
@@ -338,7 +348,7 @@ class EnvWorker:
                     state.applied += bool(outcome.get("applied"))
                     state.refused += not outcome.get("applied")
 
-                self._capture_scene(env, state)
+                self._capture_scene(env, state, scene=info.get("scene"))
 
                 done = terminated or truncated
                 if done:

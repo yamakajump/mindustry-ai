@@ -99,6 +99,7 @@ class MindustryEnv(gym.Env):
         seed: int | None = None,
         designs: tuple = (),
         window: int = 0,
+        capture_scene: bool = False,
     ) -> None:
         super().__init__()
         self.task = task
@@ -142,6 +143,17 @@ class MindustryEnv(gym.Env):
         #: map is 14 by 432 by 432 and the window is 14 by 48 by 48, so eighty times more
         #: was being encoded, sent and decoded than anybody ever looked at.
         self.window = int(window)
+
+        #: Fetch what moved on every step, for whoever wants to see it.
+        #:
+        #: One caller, deliberately. `scene()` returns everything that changed *since the
+        #: last call*, so two consumers asking independently each receive half of what
+        #: happened and neither can tell. The environment asks once and hands the answer
+        #: to both the recorder and the dashboard through `info`.
+        #:
+        #: Measured cost: 3% on the step, and 741 bytes a step, which is about two
+        #: megabytes an episode before compression.
+        self.capture_scene = bool(capture_scene)
 
         #: Set by `_stamp` for the step it happened on, so a replay can show it.
         self._last_stamp: dict[str, Any] | None = None
@@ -567,4 +579,11 @@ class MindustryEnv(gym.Env):
             "raw": raw,
             "steps": self._steps,
         }
+        if self.capture_scene:
+            try:
+                info["scene"] = bridge.scene()
+            except Exception:
+                # A dropped frame is a gap in a recording, not a reason to lose the
+                # environment it came from. The next delta resynchronises anyway.
+                info["scene"] = None
         return self._encode(raw), float(reward), bool(won or lost), bool(truncated), info

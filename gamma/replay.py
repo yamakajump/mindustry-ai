@@ -29,6 +29,16 @@ def _encode_bytes(data: bytes) -> str:
     return base64.b64encode(zlib.compress(bytes(data), 9)).decode("ascii")
 
 
+#: Scene fields that repeat every step and are already in the frame or the header.
+_SCENE_NOISE = frozenset({"ok", "playing", "width", "height", "tick", "wave", "wave_time"})
+
+
+def _trimmed(scene: dict[str, Any]) -> dict[str, Any]:
+    """The scene without what the frame already carries, and without empty deltas."""
+    return {k: v for k, v in scene.items()
+            if k not in _SCENE_NOISE and v not in (None, [], {}, 0)}
+
+
 def _encode_plane(plane: np.ndarray) -> str:
     return _encode_bytes(np.ascontiguousarray(plane, dtype=np.uint8).tobytes())
 
@@ -46,6 +56,9 @@ class ReplayRecorder:
         self.path = Path(path)
         self.note = note
         self._file: gzip.GzipFile | None = None
+        # Recording is the only reason to pay for the scene, so the recorder turns it on
+        # rather than every caller having to remember to.
+        env.capture_scene = True
         self._previous_raw: dict[str, Any] | None = None
         self._step = 0
 
@@ -117,7 +130,8 @@ class ReplayRecorder:
         observation, reward, terminated, truncated, info = self.env.step(action)
         self._step += 1
         if self._file is not None:
-            self._write(self._frame(info["raw"], reward, info.get("action"), action))
+            self._write(self._frame(info["raw"], reward, info.get("action"), action,
+                                    info.get("scene")))
             if terminated or truncated:
                 self._write({
                     "type": "end",
@@ -133,6 +147,7 @@ class ReplayRecorder:
         reward: float,
         outcome: dict | None = None,
         action: Any = None,
+        scene: dict | None = None,
     ) -> dict:
         # The tile diff is gone, and its removal is the point rather than a tidy-up.
         #
@@ -172,6 +187,14 @@ class ReplayRecorder:
         }
         if itemised:
             frame["terms"] = itemised
+
+        # Everything that moved, which is the difference between a recording and a
+        # reconstruction. Actions alone say what the agent asked for; they say nothing
+        # about where the enemies were, what the turrets shot at, or what was riding the
+        # conveyors. Replaying actions on a rebuilt world re-simulates all of that, and
+        # any divergence compounds, so a replay drifts from the episode it claims to show.
+        if scene:
+            frame["scene"] = _trimmed(scene)
         if outcome is not None and not outcome.get("applied", True):
             frame["refused"] = 1
 
