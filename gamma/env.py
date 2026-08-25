@@ -612,8 +612,11 @@ class MindustryEnv(gym.Env):
                 legal.append(bool(free.any()))
             if self.designs:
                 legal.append(bool(block_mask.any() and free.any()))
+            # `free | owned` for the same reason as the embodied branch below: one
+            # position head serves every action type, and `free` alone makes breaking
+            # impossible to aim because the two sets are disjoint by construction.
             return {"type": np.array(legal, dtype=bool),
-                    "block": block_mask, "position": free}
+                    "block": block_mask, "position": free | owned}
 
         unit = obs.get("unit", {})
         carrying = int(unit.get("carrying", 0))
@@ -669,7 +672,21 @@ class MindustryEnv(gym.Env):
         return {
             "type": np.array(legal, dtype=bool),
             "block": block_mask,
-            "position": free,
+            # Everything any legal action could aim at, because there is one position head
+            # for four action types and it cannot know which one was chosen.
+            #
+            # It used to be `free` alone, which is buildable, empty and not solid. That is
+            # right for building and exactly inverted for breaking: `free` and `owned` are
+            # disjoint by construction, so every tile the agent was allowed to aim at when
+            # it chose `break` was guaranteed to have nothing on it. Measured over 30
+            # archived episodes: 6,660 demolitions, of which 23 hit a building the agent
+            # had placed. The other 99.7% hit natural walls or bare ground.
+            #
+            # The union is not the right answer either, only a much better wrong one: the
+            # honest fix is a position mask conditioned on the type, which means sampling
+            # the type first and is a change to the shape of the policy rather than to a
+            # mask. This removes the impossibility; it does not remove the ambiguity.
+            "position": free | owned | mineable,
             "mineable": mineable,
         }
 

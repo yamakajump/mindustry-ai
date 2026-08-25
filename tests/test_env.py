@@ -140,3 +140,27 @@ def test_a_loaded_design_is_reachable(env: MindustryEnv) -> None:
         assert info["action_mask"]["type"].shape == (len(types),)
     finally:
         env.designs = was
+
+
+def test_breaking_can_aim_at_something_breakable(env: MindustryEnv) -> None:
+    """One position head serves four action types, so its mask must cover all of them.
+
+    It was `free` alone: buildable, empty, not solid. Right for building and exactly
+    inverted for breaking, because `free` and `owned` are disjoint by construction, so
+    every tile the agent could aim at while choosing `break` was guaranteed to hold
+    nothing. Measured over 30 archived episodes: 6,660 demolitions, 23 of which hit a
+    building the agent had placed.
+    """
+    import numpy as np
+
+    _, info = env.reset()
+    mask = info["action_mask"]
+
+    spatial = info["raw"]["spatial"]
+    channels = env._bridge.channels
+    owned = spatial[channels.index("block_ally")] > 0
+
+    assert owned.any(), "the core is an ally building, so something must be breakable"
+    assert (mask["position"] & owned).any(), (
+        "no tile holding an ally building is aimable, so breaking cannot ever work"
+    )
