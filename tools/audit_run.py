@@ -104,28 +104,57 @@ def check_core_losses(episodes) -> bool:
 
 
 def check_annuity(episodes) -> bool:
-    """The same non-zero reward, thousands of steps running, is a level being paid.
+    """Income on steps where nothing happened is a level being paid, not a rate.
 
-    The generator term paid 0.05 per unit of generation on every step, so a machine bought
-    once printed points for the rest of the episode. Its fingerprint was 1,302 steps paying
-    exactly 0.55 and 583 paying exactly 0.45.
+    The generator term paid 0.05 per unit of generation on every step, so one machine
+    bought once printed points for the rest of the episode. The tempting signature is
+    repetition, and repetition is the wrong test: that run paid the same value on 43% of
+    its steps, while a working conveyor line in the current run pays the same value on
+    58% of its steps and is exactly what the agent is supposed to be doing. A check keyed
+    on repetition would have missed the bug it was written for and cried wolf on success.
+
+    What separates them is whether anything moved. Delivery raises the core's stock; an
+    annuity pays while the world sits still. So this counts steps that paid while neither
+    the stock nor the agent did anything.
+
+    Calibrated against both archives, and the margin is thin enough to state rather than
+    hide: the farmed run sits at 17.5% and the clean one at 9.2%. Only a fifth of the
+    farmed run's steps are quiet enough to qualify, because hand mining moves the stock
+    constantly, so the annuity shows through a small window. Treat a reading between the
+    two as worth a look, not as a verdict.
+
+    The exact guarantee is not here. It is the unit test that asserts a step in which
+    nothing changed earns nothing, which is arithmetic and cannot be fooled by a busy
+    episode. This check exists to catch a term that slips past it in a way nobody thought
+    to write a test for.
     """
-    worst = (0.0, 0, 0)
+    quiet = paid_quiet = 0
     for _, frames in episodes:
-        counts = Counter(round(f["reward"], 4) for f in frames if f.get("reward"))
-        counts.pop(0.0, None)
-        if not counts:
-            continue
-        value, repeats = counts.most_common(1)[0]
-        if repeats > worst[1]:
-            worst = (value, repeats, len(frames))
+        previous = None
+        for frame in frames:
+            items = frame.get("items")
+            if items is None:
+                continue
+            if previous is not None and items == previous and not frame.get("act"):
+                quiet += 1
+                terms = frame.get("terms")
+                if terms is None:
+                    # Archives recorded before the itemisation existed, which includes
+                    # every run this check needs to be calibrated against. The raw reward
+                    # is a coarser reading and the right fallback: on a step where nothing
+                    # moved and nobody acted, any payment at all is the thing being looked
+                    # for.
+                    flow = abs(frame.get("reward", 0.0))
+                else:
+                    flow = sum(abs(v) for k, v in terms.items() if k not in ONE_OFF)
+                paid_quiet += flow > 1e-9
+            previous = items
 
-    value, repeats, length = worst
-    share = repeats / length if length else 0.0
+    share = paid_quiet / quiet if quiet else 0.0
     return report(
-        "pas de rente par step", share < 0.5,
-        f"pire episode : la valeur {value} revient {repeats} fois sur {length} steps "
-        f"({share:.0%})\n(une livraison honnete varie, un niveau paye se repete)",
+        "pas de revenu quand rien ne bouge", share < 0.14,
+        f"{paid_quiet} steps payes sur {quiet} ou ni le stock ni l'agent n'ont bouge "
+        f"({share:.1%}). Etalonnage : run farme 17,5%, run propre 9,2%, seuil 14%.",
     )
 
 
@@ -147,11 +176,10 @@ def check_terms_add_up(episodes) -> bool:
                 bad += 1
     return report(
         "le detail egale le total", bad == 0,
-        f"{bad} step(s) sur {checked} ou la somme des termes ne fait pas la recompense
-"
-        f"(un petit nombre fige est attendu dans un run demarre avant que le bonus de
-"
-        f"reussite ne soit itemise ; il doit disparaitre a la relance suivante)",
+        f"{bad} step(s) sur {checked} ou la somme des termes ne fait pas la "
+        f"recompense. Un petit nombre fige est attendu dans un run demarre avant "
+        f"que le bonus de reussite ne soit itemise ; il doit disparaitre a la "
+        f"relance suivante.",
     )
 
 
