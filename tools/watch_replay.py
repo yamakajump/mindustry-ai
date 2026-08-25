@@ -83,6 +83,45 @@ def envelope(scene: dict, frame: dict, header: dict) -> dict:
     }
 
 
+class Playback:
+    """A cursor over the recording, which can be moved in either direction.
+
+    Forwards is just reading on. Backwards cannot be: the scene is a stream of deltas, so
+    a building placed at step ten and never touched again appears in step ten and in no
+    step after it. Rewinding by replaying deltas from where you are would therefore lose
+    everything that has not moved recently, which on a base is most of it.
+
+    So going back means starting the world again and replaying up to the target. It costs
+    a pass over a few thousand small frames, nothing is drawn during it, and it is the only
+    reading that cannot quietly lose a wall.
+    """
+
+    def __init__(self, monitor: TrainingMonitor, header: dict, frames: list[dict]) -> None:
+        self.monitor = monitor
+        self.header = header
+        self.frames = frames
+        self.cursor = 0
+        self.target: int | None = None
+
+    def seek(self, step: int) -> None:
+        """Asked for by the dashboard, honoured by the reader between two frames."""
+        self.target = max(0, min(step, len(self.frames) - 1))
+
+    def _rewind_to(self, step: int, state) -> None:
+        # Cleared rather than rebuilt: the version keeps climbing, so a browser holding
+        # an old one is resynced with the whole world instead of being handed deltas
+        # against a past that no longer exists.
+        state.scene.clear()
+        total = 0.0
+        for frame in self.frames[:step]:
+            scene = frame.get("scene")
+            if scene:
+                state.scene.apply(envelope(scene, frame, self.header))
+            total += float(frame.get("reward", 0.0))
+        self.cursor = step
+        return total
+
+
 def play(monitor: TrainingMonitor, header: dict, frames: list[dict], speed: float) -> None:
     """Walk the recording, handing each frame to the same buffer the trainer feeds."""
     state = monitor.match(0)
@@ -97,13 +136,24 @@ def play(monitor: TrainingMonitor, header: dict, frames: list[dict], speed: floa
     state.terrain_size = [header["width"], header["height"]]
     state.alive = True
 
+    playback = Playback(monitor, header, frames)
+    monitor.seeker = playback.seek
+    monitor.length = len(frames)
+
     total = 0.0
-    for frame in frames:
+    while playback.cursor < len(frames):
         # The dashboard's pause button, which is the same button either way: there it
         # stops the trainer asking for steps, here it stops the reader handing them over.
         monitor.running.wait()
         if monitor.stopping.is_set():
             break
+
+        if playback.target is not None:
+            total = playback._rewind_to(playback.target, state)
+            playback.target = None
+
+        frame = frames[playback.cursor]
+        playback.cursor += 1
 
         scene = frame.get("scene")
         if scene:

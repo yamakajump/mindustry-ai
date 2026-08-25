@@ -21,7 +21,7 @@ import time
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 VIEWER_DIR = Path(__file__).resolve().parent.parent / "viewer"
 
@@ -413,8 +413,14 @@ class TrainingMonitor:
             del self._generations[:-400]
             return generation
 
-    def control(self, action: str) -> None:
-        """Pause, resume or stop the run from the dashboard.
+    #: Set by whoever can move through time. A training run cannot: it has no earlier
+    #: state to go back to, so seeking is refused rather than silently ignored. A
+    #: recording can, which is the whole point of watching one.
+    seeker: Callable[[int], None] | None = None
+    length: int = 0
+
+    def control(self, action: str, step: int | None = None) -> None:
+        """Pause, resume, stop or seek the run from the dashboard.
 
         Stopping is not killing: the loop notices, saves its checkpoint and shuts the
         environments down, so the run can be picked up again from where it was. Before
@@ -430,6 +436,8 @@ class TrainingMonitor:
             # Released so a paused run can actually reach the exit rather than sitting on
             # the pause it was asked to leave.
             self.running.set()
+        elif action == "seek" and self.seeker is not None and step is not None:
+            self.seeker(step)
 
     def recent_mean(self, episodes: int = 30) -> float | None:
         """Mean reward over the last `episodes` finished episodes, or None if too few.
@@ -500,6 +508,10 @@ class TrainingMonitor:
             "leaderboard": leaderboard,
             "paused": not self.running.is_set(),
             "stopping": self.stopping.is_set(),
+            # A recording can be moved through; a training run cannot. The dashboard shows
+            # the scrub bar on this rather than on guessing from the title.
+            "seekable": self.seeker is not None,
+            "length": self.length,
             "totals": {
                 "matches": len(matches),
                 "episodes": episodes,
@@ -588,11 +600,19 @@ class TrainingMonitor:
                     return
 
                 if self.path.startswith("/control/"):
-                    action = self.path[len("/control/"):].split("?")[0]
-                    if action not in ("pause", "resume", "stop"):
+                    action, _, query = self.path[len("/control/"):].partition("?")
+                    if action not in ("pause", "resume", "stop", "seek"):
                         self.send_error(404)
                         return
-                    monitor.control(action)
+                    step = None
+                    for pair in query.split("&"):
+                        key, _, value = pair.partition("=")
+                        if key == "step" and value.lstrip("-").isdigit():
+                            step = int(value)
+                    if action == "seek" and (monitor.seeker is None or step is None):
+                        self.send_error(400)
+                        return
+                    monitor.control(action, step)
                     self._json({"ok": True, "action": action,
                                 "paused": not monitor.running.is_set(),
                                 "stopping": monitor.stopping.is_set()})

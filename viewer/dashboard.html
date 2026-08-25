@@ -220,6 +220,11 @@
   <div class="stat"><b id="s-sps" class="num">0</b><span data-i18n="stepsPerSecond">steps/s</span></div>
   <div class="stat"><b id="s-elapsed" class="num">0s</b><span data-i18n="elapsed">elapsed</span></div>
   <div class="right">
+    <!-- Only a recording can be moved through, so this stays hidden on a training run,
+         where there is no earlier state to go back to. -->
+    <input id="scrub" type="range" min="0" max="0" value="0" step="1" hidden
+           style="width:220px;accent-color:#ffd37f;vertical-align:middle">
+    <span id="scrub-at" class="pill" hidden>0</span>
     <button id="pause" class="ghost" type="button" data-i18n="pause">pause</button>
     <button id="stop" class="ghost danger" type="button" data-i18n="stop">stop &amp; save</button>
     <button id="lang" class="ghost" aria-label="Switch language">FR</button>
@@ -2190,6 +2195,11 @@ function bindControls() {
   const pause = document.getElementById("pause");
   const stop = document.getElementById("stop");
   pause.onclick = () => control(paused ? "resume" : "pause");
+
+  const scrub = document.getElementById("scrub");
+  // On release rather than on every pixel: seeking backwards replays the recording from
+  // the start, so dragging across a thousand steps would ask for a thousand rewinds.
+  scrub.onchange = () => fetch(`control/seek?step=${scrub.value}`).catch(() => {});
   stop.onclick = () => {
     // Stopping is not killing: the loop saves its checkpoint on the way out and the next
     // run picks up where this one left off. Worth saying, because the button reads
@@ -2206,6 +2216,18 @@ function renderControls(state) {
   pause.textContent = paused ? t("resume") : t("pause");
   pause.classList.toggle("danger", paused);
   document.getElementById("stop").disabled = !!state.stopping;
+
+  const scrub = document.getElementById("scrub");
+  const at = document.getElementById("scrub-at");
+  scrub.hidden = at.hidden = !state.seekable;
+  if (!state.seekable) return;
+
+  scrub.max = Math.max(0, (state.length || 1) - 1);
+  const step = (state.matches[0] || {}).step || 0;
+  // Left alone while it is being dragged, or every poll would yank the handle back to
+  // where the reader currently is and make it impossible to aim at anything.
+  if (!scrub.matches(":active")) scrub.value = step;
+  at.textContent = `${step} / ${scrub.max}`;
 }
 
 function renderVersions(generations) {
