@@ -183,40 +183,72 @@ def check_terms_add_up(episodes) -> bool:
     )
 
 
-def check_progress(episodes) -> str:
-    """Not a pass or a fail: the two numbers the score is supposed to stand for.
+def trend(url: str) -> str:
+    """The real progression, taken from the run rather than from the archive.
 
-    A score can rise for reasons that have nothing to do with playing better, which is how
-    all three exploits presented. These are measured on the artefact instead: ore that
-    actually arrived, and whether the base was still standing at the end.
+    The archive cannot answer this and it took a false alarm to notice. It prunes to the
+    best five episodes per environment, the most recent three, and every solved one, so
+    the older files that survive are precisely the high-scoring ones. Splitting it by age
+    therefore compares survivors against a fresh sample and manufactures a collapse every
+    single time: it showed 422.8 falling to 16.9, a twenty-five-fold drop, while the
+    training losses were perfectly steady and nothing was wrong.
+
+    The dashboard keeps the mean over the last thirty finished episodes for each
+    generation, which is the same measure applied to every generation alike.
     """
-    half = len(episodes) // 2 or 1
-    lines = []
-    for label, part in (("premiere moitie", episodes[:half]), ("seconde moitie", episodes[half:])):
+    try:
+        import urllib.request
+        with urllib.request.urlopen(url, timeout=5) as answer:
+            generations = json.loads(answer.read())["generations"]
+    except Exception as error:
+        return (f"  tendance indisponible ({type(error).__name__}). L'archive ne "
+                f"peut pas la remplacer : elle garde les meilleurs episodes, donc "
+                f"toute lecture par anciennete y montre une chute.")
+
+    points = [g for g in generations if g.get("mean_reward") is not None]
+    if len(points) < 12:
+        return "  pas encore assez de generations pour une tendance"
+
+    step = len(points) // 6
+    lines_out = []
+    for index in range(6):
+        part = points[index * step:(index + 1) * step]
         if not part:
             continue
-        delivered = [
-            sum((f.get("terms") or {}).get("delivered", 0.0) for f in frames)
-            for _, frames in part
-        ]
-        died = sum(
-            1 for _, frames in part
-            if any((f.get("terms") or {}).get("core_lost") for f in frames)
+        mean = sum(g["mean_reward"] for g in part) / len(part)
+        wave = max(g.get("best_wave") or 0 for g in part)
+        lines_out.append(
+            f"  updates {part[0]['update']:5d}-{part[-1]['update']:5d} : "
+            f"moyenne {mean:8.1f}   meilleure vague {wave:2d}"
         )
-        score = [sum(f.get("reward", 0.0) for f in frames) for _, frames in part]
-        lengths = sorted(len(frames) for _, frames in part)
-        lines.append(
-            f"  {label:<16} score {sum(score) / len(part):8.1f}   "
-            f"livraison {sum(delivered) / len(part):7.1f}   "
-            f"core perdu {100 * died / len(part):3.0f}%   "
-            f"duree mediane {lengths[len(lengths) // 2]:5d}"
-        )
-    return "\n".join(lines)
+    return "\n".join(lines_out)
+
+
+def describe_archive(episodes) -> str:
+    """What the archive holds right now. A snapshot, deliberately not a trend."""
+    delivered = [
+        sum((f.get("terms") or {}).get("delivered", 0.0) for f in frames)
+        for _, frames in episodes
+    ]
+    died = sum(
+        1 for _, frames in episodes
+        if any((f.get("terms") or {}).get("core_lost") for f in frames)
+    )
+    lengths = sorted(len(frames) for _, frames in episodes)
+    return (
+        f"  {len(episodes)} episodes conserves   "
+        f"livraison moyenne {sum(delivered) / len(episodes):7.1f}   "
+        f"core perdu {100 * died / len(episodes):3.0f}%   "
+        f"duree mediane {lengths[len(lengths) // 2]:5d}\n"
+        f"  (instantane biaise vers le haut : l'archive garde les meilleurs)"
+    )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path("replays/live"))
+    parser.add_argument("--dashboard", default="http://127.0.0.1:8800/state",
+                        help="ou lire la vraie progression, l'archive en etant incapable")
     parser.add_argument("--limit", type=int, default=400,
                         help="how many recent episodes to read")
     args = parser.parse_args()
@@ -234,8 +266,11 @@ def main() -> None:
         check_terms_add_up(episodes),
     ])
 
-    print("\nce que le score est cense representer :")
-    print(check_progress(episodes))
+    print("\nprogression reelle, mesuree sur le run :")
+    print(trend(args.dashboard))
+
+    print("\nce que l'archive contient en ce moment :")
+    print(describe_archive(episodes))
 
     print()
     print("AUDIT : rien de suspect" if passed
