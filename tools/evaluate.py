@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import statistics
 import time
 from dataclasses import dataclass
@@ -55,6 +56,13 @@ def summarise(name: str, outcomes: list[Outcome]) -> dict:
         "episodes": len(outcomes),
         "sectors": len({o.sector for o in outcomes}),
         "mean_reward": round(statistics.fmean(rewards), 3) if rewards else 0.0,
+        # The uncertainty on that mean, which is what a comparison has to be read against.
+        # The spread alone invites the mistake this file made twice: two runs of the same
+        # measurement named opposite winners, at 1.3 and 0.7 standard deviations, and both
+        # were reported as results.
+        "standard_error": round(
+            statistics.pstdev(rewards) / math.sqrt(len(rewards)), 3
+        ) if len(rewards) > 1 else 0.0,
         # The spread matters as much as the mean here: a policy that scores well on a
         # third of the worlds and collapses on the rest has not generalised, and its mean
         # can look identical to one that copes everywhere.
@@ -128,9 +136,17 @@ def network_policy(net: PolicyNet, device: str):
     return act
 
 
-def random_policy(env):
+def random_policy(env, seed: int = 20260825):
     """The floor. Masked, because an unmasked random policy is refused almost always and
-    would set a floor no policy could fail to clear."""
+    would set a floor no policy could fail to clear.
+
+    Seeded, which it was not, and that mattered more than it sounds. Drawing from the
+    global generator made the floor different on every run, so the same policy on the same
+    held-out sectors was compared against a different opponent each time. Measured: the
+    unseeded floor delivered 18.7 ore in one run and 0 in the next, on the same worlds, and
+    the two runs disagreed about which policy won.
+    """
+    rng = np.random.default_rng(seed)
 
     def act(observation, info):
         mask = info.get("action_mask", {})
@@ -138,13 +154,13 @@ def random_policy(env):
         blocks = np.flatnonzero(mask["block"])
         positions = np.flatnonzero(mask["position"].reshape(-1))
         window = env.size
-        flat = int(np.random.choice(positions)) if positions.size else 0
+        flat = int(rng.choice(positions)) if positions.size else 0
         return np.array([
-            int(np.random.choice(types)) if types.size else 0,
-            int(np.random.choice(blocks)) if blocks.size else 0,
+            int(rng.choice(types)) if types.size else 0,
+            int(rng.choice(blocks)) if blocks.size else 0,
             flat % window,
             flat // window,
-            np.random.randint(4),
+            rng.integers(4),
         ])
 
     return act
@@ -231,6 +247,27 @@ def main() -> None:
 
     env.close()
     report["seconds"] = round(time.time() - started, 1)
+
+    # The only line that answers the question this tool exists for, and it says "not
+    # enough evidence" far more often than a mean reward suggests.
+    if len(report["results"]) == 2:
+        first, second = report["results"]
+        gap = first["mean_reward"] - second["mean_reward"]
+        uncertainty = math.hypot(first["standard_error"], second["standard_error"])
+        sigmas = abs(gap) / uncertainty if uncertainty else 0.0
+        report["verdict"] = {
+            "gap": round(gap, 3), "uncertainty": round(uncertainty, 3),
+            "sigmas": round(sigmas, 2),
+            "conclusive": sigmas >= 2.0,
+        }
+        print()
+        print(f"{first['policy']} minus {second['policy']}: {gap:+.2f} +-{uncertainty:.2f}, "
+              f"{sigmas:.1f} standard deviations")
+        if sigmas < 2.0:
+            print("Not enough evidence to separate them. More episodes, or a bigger "
+                  "difference, or both.")
+        else:
+            print(f"{first['policy'] if gap > 0 else second['policy']} is ahead.")
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=2), encoding="utf-8")

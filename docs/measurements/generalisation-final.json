@@ -1,0 +1,81 @@
+{
+  "task": "frontier",
+  "held_out": true,
+  "episodes_each": 30,
+  "designs": 1,
+  "results": [
+    {
+      "policy": "beta",
+      "episodes": 30,
+      "sectors": 19,
+      "mean_reward": -33.767,
+      "standard_error": 3.209,
+      "reward_spread": 17.575,
+      "worst_reward": -57.787,
+      "mean_wave": 2.6,
+      "mean_built": 30.4,
+      "mean_produced": 0.0,
+      "solved": 0,
+      "milestones": {
+        "first_drill": 0.63,
+        "first_conveyor": 0.93,
+        "first_wall": 0.93,
+        "first_turret": 0.93,
+        "automation": 0.0,
+        "automation_100": 0.0,
+        "automation_1k": 0.0,
+        "automation_10k": 0.0,
+        "two_ores": 0.0,
+        "three_ores": 0.0,
+        "first_kill": 0.03,
+        "held_a_wave": 0.0,
+        "first_power": 0.0,
+        "first_crafter": 0.0,
+        "first_factory": 0.0,
+        "wave_5": 0.03,
+        "wave_10": 0.0,
+        "wave_20": 0.0
+      }
+    },
+    {
+      "policy": "random",
+      "episodes": 30,
+      "sectors": 16,
+      "mean_reward": -20.342,
+      "standard_error": 7.861,
+      "reward_spread": 43.054,
+      "worst_reward": -57.774,
+      "mean_wave": 2.63,
+      "mean_built": 27.6,
+      "mean_produced": 9.4,
+      "solved": 1,
+      "milestones": {
+        "first_drill": 0.57,
+        "first_conveyor": 0.9,
+        "first_wall": 0.9,
+        "first_turret": 0.9,
+        "automation": 0.07,
+        "automation_100": 0.07,
+        "automation_1k": 0.0,
+        "automation_10k": 0.0,
+        "two_ores": 0.0,
+        "three_ores": 0.0,
+        "first_kill": 0.03,
+        "held_a_wave": 0.0,
+        "first_power": 0.0,
+        "first_crafter": 0.0,
+        "first_factory": 0.0,
+        "wave_5": 0.03,
+        "wave_10": 0.03,
+        "wave_20": 0.0
+      }
+    }
+  ],
+  "seconds": 518.1,
+  "verdict": {
+    "gap": -13.425,
+    "uncertainty": 8.491,
+    "sigmas": 1.58,
+    "conclusive": false
+  }
+}
