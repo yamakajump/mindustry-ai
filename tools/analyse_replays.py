@@ -246,30 +246,56 @@ def main() -> None:
               f"{episode['touching']} reaching, {episode['chains']} chains")
     print()
 
-    if not with_chain:
-        print("VERDICT: not one chain among the placements the agent REQUESTED.")
+    # The cross-tab that settles it, and the reason the reconstruction above is not to be
+    # trusted on its own. Delivery is measured; "touching the core" is reconstructed. An
+    # episode that delivered while no drill it asked for ever sat against the core proves
+    # the ore travelled, whatever this file failed to see.
+    delivering = [e for e in studied if e["terms"].get("delivered", 0.0) > 0]
+    travelled = [e for e in delivering if not e["adjacent"]]
+    if delivering:
+        print(f"  delivered ore                   {len(delivering):4d}"
+              f"   ({100 * len(delivering) / len(studied):.0f}% of episodes, measured)")
+        print(f"  delivered with NO drill touching{len(travelled):5d}"
+              f"   <- the ore travelled: a supply line worked")
+        if travelled:
+            best = max(travelled, key=lambda e: e["terms"]["delivered"])
+            print(f"     best of those: {best['terms']['delivered'] / 0.1:,.0f} ore, "
+                  f"{best['drills']} drills, {best['carriers']} carriers, "
+                  f"0 of them against the core")
         print()
-        print("         Read that literally, because this tool reads intentions and not")
-        print("         the world. It reconstructs a layout from the `place` actions in")
-        print("         the replay, and an embodied agent has to fly to a site and build")
-        print("         it, so a request can be refused, interrupted, or demolished later:")
-        print("         one episode here issued 559 placements and 439 demolitions. The")
-        print("         layout below is therefore an upper bound on what ever existed and")
-        print("         says nothing about what existed at the same time.")
+
+    if not with_chain and travelled:
+        print("VERDICT: the reconstruction below found no chain and the reconstruction is")
+        print("         wrong. It reads the `place` actions, which is what the agent ASKED")
+        print("         for, and an embodied agent flies to each site: requests get refused,")
+        print("         interrupted, or demolished later, one episode issuing 559 placements")
+        print("         against 439 demolitions. It is an upper bound on what was requested")
+        print("         and it has no notion of two blocks standing at the same moment.")
         print()
-        print("         It also cannot explain delivery. An episode with zero chains by")
-        print("         this measure was paid for ore arriving through a transport block on")
-        print("         87% of its steps, and hand mining was ruled out against a live")
-        print("         server: mined by hand, core stock went 200 -> 503 while the")
-        print("         delivery counter stayed at zero. Something was connected that this")
-        print("         reconstruction does not see.")
+        print("         What is measured says the opposite. Ore reached the core through a")
+        print("         transport block in episodes where not one drill sat against it, so")
+        print("         it was carried there. Hand mining cannot explain it, checked against")
+        print("         a live server: mined by hand, core stock went 200 -> 503 while the")
+        print("         delivery counter stayed at zero. Nor can building and demolishing,")
+        print("         nor idling, both of which pay exactly nothing.")
         print()
-        print("         For where an episode's points actually came from, read the `terms`")
-        print("         field the recorder now writes on every frame. That is measured, not")
-        print("         reconstructed.")
+        print("         The agent builds supply lines that work. Read `terms`, not this.")
+    elif not with_chain:
+        print("VERDICT: no chain among the requested placements, and no measured delivery")
+        print("         either. Those agree, for once.")
     else:
         share = len(with_chain) / len(studied)
-        print(f"VERDICT: {len(with_chain)} episodes built a real chain, {share:.1%} of them.")
+        print(f"VERDICT: {len(with_chain)} episodes built a chain the reconstruction could")
+        print(f"         follow, {share:.1%}. Treat that as a floor and not a result: it counts")
+        print("         requested placements, honours rotations, and gives up at the first")
+        print("         router or junction, so it undercounts every layout that works by")
+        print("         any other means.")
+        if delivering:
+            print()
+            print(f"         Measured, {len(delivering)} episodes delivered "
+                  f"({100 * len(delivering) / len(studied):.0f}%), "
+                  f"{len(travelled)} of them without a single drill")
+            print("         against the core. The ore travelled. That is the real number.")
 
 
 if __name__ == "__main__":
