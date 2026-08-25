@@ -234,15 +234,6 @@ def _crafting(obs: Observation) -> float:
     return float(obs.get("crafting", 0.0))
 
 
-def _power(obs: Observation) -> float:
-    """How much generation is running right now.
-
-    Instantaneous rather than cumulative on purpose: it says a generator is burning
-    something at this moment, which is what a working fuel line amounts to.
-    """
-    return float(obs.get("power", 0.0))
-
-
 def _consumed(before: Observation, after: Observation) -> float:
     """Everything the team's machines consumed usefully this step.
 
@@ -262,12 +253,28 @@ def _consumed(before: Observation, after: Observation) -> float:
     """
     delivered = _produced(after) - _produced(before)
     crafted = _crafting(after) - _crafting(before)
-    generating = _power(after)
-
-    # Weighted by how deep in the game each one sits. Crafting is two production lines
-    # meeting and is worth more per unit than ore arriving; power is a precondition for
-    # the tier above and is worth acknowledging while it runs.
-    return max(0.0, delivered) * 0.1 + max(0.0, crafted) * 0.5 + generating * 0.05
+    # Power is deliberately NOT paid here, and the reason is worth keeping.
+    #
+    # It used to be, as `generation * 0.05`, described as "worth acknowledging while it
+    # runs". That reads as a small courtesy and is in fact an annuity: generation is a
+    # LEVEL, so paying it every step pays it three thousand times per episode for a
+    # machine bought once. The agent found it immediately. Measured on the best episode of
+    # that run, +1577.4 total:
+    #
+    #     0.55 on 1302 steps, 0.45 on 583, 0.35 on 294, 0.25 on 334
+    #
+    # Every reward an exact multiple of 0.05, which is generation of 11, 9, 7 and 5 burning
+    # steadily and nothing else happening at all: no delivery, no craft, not one ore
+    # carried, since any of those would have broken the multiple. Roughly 1400 of the 1577
+    # points were the annuity and the rest were milestones. Across 167 archived episodes
+    # that policy built ONE conveyor line that actually reached a core, 0.6% of them, while
+    # its mean score climbed smoothly from +21 to +205. It was learning, and what it had
+    # found to learn was that a generator prints points for free.
+    #
+    # Power still pays, twice, and both times honestly: `first_power` once as a milestone,
+    # and then through what it enables, since a crafter is paid per craft and a turret per
+    # kill. Paying the level on top was double counting the same machine forever.
+    return max(0.0, delivered) * 0.1 + max(0.0, crafted) * 0.5
 
 
 def _placed(category: str) -> Callable[[Observation], int]:

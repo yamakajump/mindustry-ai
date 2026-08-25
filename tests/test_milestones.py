@@ -175,9 +175,21 @@ def test_a_factory_doing_work_pays_without_anything_reaching_the_core(reward) ->
     assert reward(state(), state(crafting=12.0)) == pytest.approx(6.0)
 
 
-def test_a_generator_running_pays_while_it_runs(reward) -> None:
-    """Instantaneous rather than cumulative: it says a fuel line exists right now."""
-    assert reward(state(), state(power=4.0)) == pytest.approx(0.2)
+def test_a_running_generator_pays_nothing_per_step(reward) -> None:
+    """The opposite of what this test used to assert, because the old version was wrong.
+
+    It read "instantaneous rather than cumulative: it says a fuel line exists right now",
+    and asserted 0.2 for generation of 4. Both the sentence and the number describe an
+    annuity: generation is a level, so a machine bought once collects that 0.2 on every
+    remaining step, three thousand times over a full episode. A policy trained against it
+    reached a mean of +205 and a best episode of +1577 while building, across 167 archived
+    episodes, exactly one conveyor line that ever reached a core.
+
+    Power is paid once by the `first_power` milestone and then through what it enables, a
+    craft at a time and a kill at a time. Running is not an achievement it repeats.
+    """
+    assert reward(state(), state(power=4.0)) == pytest.approx(0.0)
+    assert reward(state(power=4.0), state(power=40.0)) == pytest.approx(0.0)
 
 
 def test_a_loop_of_conveyors_earns_nothing(reward) -> None:

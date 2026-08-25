@@ -162,7 +162,20 @@ def main() -> None:
     if not episodes:
         raise SystemExit(f"no archived episode under {args.root}")
 
-    studied = [study(path) for path in episodes]
+    # Episodes are pruned by the recorder while training runs, so a path listed a moment
+    # ago can be gone by the time it is opened. Reading a live archive has to tolerate
+    # that; the alternative is an analysis that only works once training has stopped.
+    studied = []
+    vanished = 0
+    for path in episodes:
+        try:
+            studied.append(study(path))
+        except (FileNotFoundError, EOFError, gzip.BadGzipFile):
+            vanished += 1
+    if vanished:
+        print(f"{vanished} episode(s) pruned or half-written while reading, skipped")
+    if not studied:
+        raise SystemExit(f"no readable episode under {args.root}")
     blocks: Counter = Counter()
     for episode in studied:
         blocks.update(episode["placed"])
