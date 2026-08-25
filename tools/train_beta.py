@@ -681,6 +681,11 @@ def main() -> None:
                 "type": torch.zeros((steps, n_envs, net.n_types), dtype=torch.bool, device=device),
                 "block": torch.zeros((steps, n_envs, net.n_blocks), dtype=torch.bool, device=device),
                 "position": torch.zeros((steps, n_envs, args.window ** 2), dtype=torch.bool, device=device),
+                # One plane per kind of target, which is what lets the network mask
+                # positions against the action type it has just chosen.
+                "position_sets": torch.zeros(
+                    (steps, n_envs, 4, args.window ** 2),
+                    dtype=torch.bool, device=device),
             },
         )
 
