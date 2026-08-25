@@ -412,6 +412,36 @@ def _build_and_hold() -> Callable[[Observation, Observation], float]:
     lost core cost fifty against a plausible ten for a whole episode of production.
     """
 
+    def terms(before: Observation, after: Observation) -> dict[str, float]:
+        """The same reward, itemised.
+
+        This exists because a total is not diagnosable. Twice in one session a run was
+        misread from its score alone: once when a rising curve turned out to be an annuity
+        on a generator, and once when the source of a steady stream of points could not be
+        named without three separate probes against a live server. A number that cannot be
+        attributed is a number that gets believed.
+
+        Recorded per step in the replay, so any episode can be asked where its points came
+        from without re-running anything.
+        """
+        delivered = _produced(after) - _produced(before)
+        crafted = _crafting(after) - _crafting(before)
+        return {
+            "milestones": milestones(before, after),
+            "delivered": max(0.0, delivered) * 0.1,
+            "crafted": max(0.0, crafted) * 0.5,
+            "hand": _banked_by_hand(before, after) * 0.002,
+            "carrying": _carrying(0.001)(before, after),
+            "kills": (_stat("enemy_units_destroyed")(after)
+                      - _stat("enemy_units_destroyed")(before)) * 2.0,
+            "lost": (_stat("buildings_destroyed")(after)
+                     - _stat("buildings_destroyed")(before)) * -0.5,
+            "waves": (_wave(after) - _wave(before)) * 1.0,
+            "damage": max(0.0, float(before.get("core_health", 0.0))
+                          - float(after.get("core_health", 0.0))) * -0.005,
+            "core_lost": -50.0 if before.get("has_core") and not after.get("has_core") else 0.0,
+        }
+
     def reward(before: Observation, after: Observation) -> float:
         kills = _stat("enemy_units_destroyed")(after) - _stat("enemy_units_destroyed")(before)
         lost = _stat("buildings_destroyed")(after) - _stat("buildings_destroyed")(before)
@@ -440,6 +470,7 @@ def _build_and_hold() -> Callable[[Observation, Observation], float]:
             + (-50.0 if before.get("has_core") and not after.get("has_core") else 0.0)
         )
 
+    reward.terms = terms
     return reward
 
 #: Steps that fit before the first wave arrives on Ancient_Caldera.

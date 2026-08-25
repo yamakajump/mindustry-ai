@@ -1,4 +1,18 @@
-"""Did the agent ever actually build a chain?
+"""What did the agent ask to build, and could it ever have formed a chain?
+
+CAVEAT, and it matters: this reads the `place` actions recorded in a replay and
+reconstructs a layout from them. That is what the agent REQUESTED, not what stood in the
+world. An embodied agent flies to a site and builds it, so requests are refused,
+interrupted, or demolished later, and one measured episode issued 559 placements against
+439 demolitions. Everything below is an upper bound on what existed, with no notion of
+two blocks existing at the same moment.
+
+Do not use it to conclude that nothing was ever connected. It was read that way once and
+the conclusion was wrong: an episode it scored at zero chains was being paid for ore
+arriving through a transport block on 87% of its steps. For where the points came from,
+read the per-frame `terms` the recorder writes, which is measured rather than inferred.
+
+Original question, still worth asking of the requests themselves:
 
     python tools/analyse_replays.py
 
@@ -209,10 +223,26 @@ def main() -> None:
     print()
 
     if not with_chain:
-        print("VERDICT: not one chain, in any episode. Every ore that reached the core")
-        print("         arrived because a drill happened to land against it. The agent has")
-        print("         never once connected anything, and the reward for doing so has")
-        print("         never been paid, so it could not have learned to.")
+        print("VERDICT: not one chain among the placements the agent REQUESTED.")
+        print()
+        print("         Read that literally, because this tool reads intentions and not")
+        print("         the world. It reconstructs a layout from the `place` actions in")
+        print("         the replay, and an embodied agent has to fly to a site and build")
+        print("         it, so a request can be refused, interrupted, or demolished later:")
+        print("         one episode here issued 559 placements and 439 demolitions. The")
+        print("         layout below is therefore an upper bound on what ever existed and")
+        print("         says nothing about what existed at the same time.")
+        print()
+        print("         It also cannot explain delivery. An episode with zero chains by")
+        print("         this measure was paid for ore arriving through a transport block on")
+        print("         87% of its steps, and hand mining was ruled out against a live")
+        print("         server: mined by hand, core stock went 200 -> 503 while the")
+        print("         delivery counter stayed at zero. Something was connected that this")
+        print("         reconstruction does not see.")
+        print()
+        print("         For where an episode's points actually came from, read the `terms`")
+        print("         field the recorder now writes on every frame. That is measured, not")
+        print("         reconstructed.")
     else:
         share = len(with_chain) / len(studied)
         print(f"VERDICT: {len(with_chain)} episodes built a real chain, {share:.1%} of them.")

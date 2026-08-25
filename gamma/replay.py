@@ -47,6 +47,7 @@ class ReplayRecorder:
         self.note = note
         self._file: gzip.GzipFile | None = None
         self._previous: np.ndarray | None = None
+        self._previous_raw: dict[str, Any] | None = None
         self._step = 0
 
     # Plumbing --------------------------------------------------------------------
@@ -154,6 +155,18 @@ class ReplayRecorder:
                 (added if current[y, x] else removed).append([int(x), int(y)])
         self._previous = current.copy()
 
+        # Where the points came from, not just how many. A total is not diagnosable: a
+        # rising curve was once an annuity on a generator, and tracking down a steady
+        # stream of delivery points afterwards took three separate probes against a live
+        # server because no episode could say what it had been paid for. Only the non-zero
+        # terms are written, so a quiet step costs nothing.
+        terms = getattr(self.env.task.reward, "terms", None)
+        itemised = None
+        if terms is not None and self._previous_raw is not None:
+            itemised = {k: round(v, 4) for k, v in terms(self._previous_raw, raw).items()
+                        if abs(v) > 1e-9}
+        self._previous_raw = raw
+
         frame: dict[str, Any] = {
             "type": "frame",
             "step": self._step,
@@ -162,6 +175,8 @@ class ReplayRecorder:
             "reward": round(float(reward), 4),
             "items": raw.get("items", {}),
         }
+        if itemised:
+            frame["terms"] = itemised
         if added:
             frame["added"] = added
         if removed:
