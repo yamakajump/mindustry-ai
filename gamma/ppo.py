@@ -186,6 +186,17 @@ class PPO:
         b_advantages = flat(advantages)
         b_returns = flat(returns)
         b_values = flat(buffer.values)
+
+        # How much of the return the critic actually predicts, the standard PPO health
+        # check and the one this file was missing. Near one, the advantages are signal;
+        # near zero, the critic knows nothing and every advantage is noise, so successive
+        # updates push the policy in unrelated directions and cancel out. That is exactly
+        # what six hundred generations of frozen per-head entropy look like from outside,
+        # and it is not something the loss values can tell apart: a small value loss on
+        # scaled rewards means nothing on its own.
+        with torch.no_grad():
+            spread = b_returns.var()
+            explained = float(1 - (b_returns - b_values).var() / spread) if spread > 0 else 0.0
         b_masks = {k: flat(v) for k, v in buffer.masks.items()}
 
         batch = b_spatial.shape[0]
@@ -271,6 +282,7 @@ class PPO:
         # Measured once per update rather than accumulated, so they must not be averaged
         # over the minibatches like the rest.
         once = {key: stats.pop(key) for key in ("reward_scale", "grad_policy", "grad_entropy")}
+        once["explained_variance"] = explained
         out = {k: v / max(1, passes) for k, v in stats.items()}
         out.update(once)
         return out

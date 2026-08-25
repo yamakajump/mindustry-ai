@@ -773,6 +773,7 @@ def main() -> None:
             f"p {stats['entropy_position']:.2f} r {stats['entropy_rotation']:.2f}]  "
             f"grad[p {stats['grad_policy']:.3f} H {stats['grad_entropy']:.3f} "
             f"tot {stats['grad_total']:.2f}/{PPOConfig.max_grad_norm}]  "
+            f"EV {stats['explained_variance']:+.2f}  "
             f"scale {stats['reward_scale']:.2f}  "
             f"episodes {snapshot['episodes']}  solved {snapshot['solved']}",
             flush=True,
