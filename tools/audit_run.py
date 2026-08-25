@@ -61,7 +61,11 @@ def report(name: str, ok: bool, detail: str) -> bool:
 #: pays fifty. Measured against the raw reward this check fired at 50.6%, and the top
 #: percentile turned out to be 57.5% core losses and 38.5% milestones, which is the design
 #: working rather than an exploit. Delivery was 0.6% of it: the opposite of a windfall.
-ONE_OFF = frozenset({"core_lost", "milestones", "won", "waves", "kills", "lost"})
+ONE_OFF = frozenset({"core_lost", "milestones", "won", "waves", "kills", "lost",
+                     # A penalty, and a penalty cannot be farmed. Counting it as
+                     # income is how this fired at 14.3% on a run whose quiet steps
+                     # netted minus four points: the agent was being shot at.
+                     "damage"})
 
 
 def check_concentration(episodes) -> bool:
@@ -117,6 +121,13 @@ def check_annuity(episodes) -> bool:
     annuity pays while the world sits still. So this counts steps that paid while neither
     the stock nor the agent did anything.
 
+    Two things it must not count, both learnt from a false alarm at 14.3% on a run whose
+    quiet steps netted minus four points. Penalties are not income: `damage` fires while
+    the agent is being shot at, which is the opposite of farming. And a stamp queues
+    thirty-eight blocks whose construction spends resources exactly while conveyors
+    deliver them, so the core's stock sits still through a working economy; delivery on
+    such a step is the machine doing its job.
+
     Calibrated against both archives, and the margin is thin enough to state rather than
     hide: the farmed run sits at 17.5% and the clean one at 9.2%. Only a fifth of the
     farmed run's steps are quiet enough to qualify, because hand mining moves the stock
@@ -146,7 +157,9 @@ def check_annuity(episodes) -> bool:
                     # for.
                     flow = abs(frame.get("reward", 0.0))
                 else:
-                    flow = sum(abs(v) for k, v in terms.items() if k not in ONE_OFF)
+                    # Positive only. A farm is about being paid, so a step that lost
+                    # points is not evidence of one.
+                    flow = sum(v for k, v in terms.items() if k not in ONE_OFF and v > 0)
                 paid_quiet += flow > 1e-9
             previous = items
 
