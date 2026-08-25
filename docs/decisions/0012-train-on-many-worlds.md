@@ -45,9 +45,15 @@ loading one:
   procedural-sector problem: it corrupted every episode reset in the project, and the local
   window has been centring on a phantom core for as long as there have been episodes.
   `logic.reset()` before loading, which is what the game does.
-- **A generated sector has no core.** In the campaign you land on one and the launch places
-  your loadout. Loading it directly gives terrain, spawns, and no way to play. A core shard
-  goes on the first clear ground near the middle.
+- **A generated sector was thought to have no core.** In the campaign you land on one and
+  the launch places your loadout, so loading it directly seemed to give terrain, spawns and
+  no way to play, and a core shard was placed on the first clear ground near the middle.
+  That is no longer what happens, and may never have been: probed on four generated
+  sectors, the placement never runs, because a core is already there when it is asked to.
+  `ensureCore` is dead code on this path. It is left in place because it costs nothing and
+  a sector that genuinely arrived without one would still be playable, but nothing should
+  be built on top of it without checking first. A curriculum that wanted the base landed
+  against ore was, and it did nothing at all.
 - **Enemy bases are stamped from a registry a headless server never loads**, and the
   generator walks into a null item. They are switched off; the wave spawns remain, and the
   pressure comes from the waves.

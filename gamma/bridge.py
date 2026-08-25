@@ -233,6 +233,7 @@ class Bridge:
         loadout: dict[str, int] | None = None,
         index: int | None = None,
         seed: int | None = None,
+        ore_near: str | None = None,
     ):
         """Load a campaign sector, by name for a preset or by index for a generated one.
 
@@ -248,6 +249,10 @@ class Bridge:
             message["loadout"] = loadout
         if seed is not None:
             message["seed"] = int(seed)
+        if ore_near is not None:
+            # A curriculum knob: land the base against this ore so a single drill delivers
+            # into it, with no line to spell. See `Task.ore_near`.
+            message["ore_near"] = ore_near
         return self.request(message)
 
     def region(self, x: int, y: int, width: int, height: int) -> dict[str, Any]:

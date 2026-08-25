@@ -563,7 +563,15 @@ public class StepLoop implements ApplicationListener {
         reloader.end();
 
         prepareCampaign();
-        if (!ensureCore()) {
+        // A curriculum knob, not a convenience. The first rung of the ladder, "a machine
+        // delivered ore", needs a chain, and a chain is one chance in a million on
+        // rotations alone: it has never once been paid, so it has never taught anything.
+        // Landing the base against ore makes a single drill deliver, which turns that
+        // cliff into a step. Absent, placement is unchanged.
+        String oreNear = message.get("ore_near") == null ? null
+            : message.get("ore_near").asString();
+
+        if (!ensureCore(oreNear)) {
             server.reply(error("no room for a core on this sector"));
             return;
         }
@@ -586,7 +594,7 @@ public class StepLoop implements ApplicationListener {
      *
      * @return false when the sector has no room at all, which is a sector to skip
      */
-    private boolean ensureCore() {
+    private boolean ensureCore(String oreNear) {
         if (Vars.state.rules.defaultTeam.core() != null) {
             return true;
         }
@@ -594,6 +602,9 @@ public class StepLoop implements ApplicationListener {
         int width = Vars.world.width(), height = Vars.world.height();
         int cx = width / 2, cy = height / 2;
         int reach = Math.max(width, height) / 2;
+        var wanted = oreNear == null ? null : Vars.content.item(oreNear);
+
+        int bestX = -1, bestY = -1, bestOre = -1;
 
         // Outward from the middle, because the middle is furthest from the wave spawns
         // that sit on the rim.
@@ -604,16 +615,53 @@ public class StepLoop implements ApplicationListener {
                         continue;
                     }
                     int x = cx + dx, y = cy + dy;
-                    if (clearFor(x, y, 3)) {
-                        Vars.world.tile(x, y).setBlock(
-                            mindustry.content.Blocks.coreShard, Vars.state.rules.defaultTeam);
-                        Log.info("[mindustry-ai] placed a core at @,@", x, y);
-                        return Vars.state.rules.defaultTeam.core() != null;
+                    if (!clearFor(x, y, 3)) {
+                        continue;
+                    }
+                    if (wanted == null) {
+                        return placeCore(x, y);
+                    }
+                    int ore = oreWithin(x, y, 4, wanted);
+                    if (ore > bestOre) {
+                        bestOre = ore;
+                        bestX = x;
+                        bestY = y;
+                    }
+                    // Enough for a drill on ore to touch the base, which is the whole
+                    // point. Searching the rest of the map for a slightly richer spot
+                    // costs time and buys nothing.
+                    if (ore >= 4) {
+                        return placeCore(x, y);
                     }
                 }
             }
         }
-        return false;
+
+        // Nothing had ore beside it, so the best clear ground found stands. A curriculum
+        // stage that quietly refuses to load would be worse than one that is a little
+        // harder than intended.
+        return bestX >= 0 && placeCore(bestX, bestY);
+    }
+
+    private boolean placeCore(int x, int y) {
+        Vars.world.tile(x, y).setBlock(
+            mindustry.content.Blocks.coreShard, Vars.state.rules.defaultTeam);
+        Log.info("[mindustry-ai] placed a core at @,@", x, y);
+        return Vars.state.rules.defaultTeam.core() != null;
+    }
+
+    /** Tiles of a given ore within reach of a spot, which is what a drill there could use. */
+    private int oreWithin(int x, int y, int reach, mindustry.type.Item wanted) {
+        int found = 0;
+        for (int ox = -reach; ox <= reach; ox++) {
+            for (int oy = -reach; oy <= reach; oy++) {
+                var tile = Vars.world.tile(x + ox, y + oy);
+                if (tile != null && tile.drop() == wanted) {
+                    found++;
+                }
+            }
+        }
+        return found;
     }
 
     /** Whether a square of the given size centred here is open ground. */

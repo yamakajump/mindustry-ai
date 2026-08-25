@@ -63,6 +63,18 @@ class Task:
     #: training pool is narrowed to.
     worlds: int | None = None
 
+    #: Land the base against this ore, so a single drill delivers into it.
+    #:
+    #: The first rung of the ladder, "a machine delivered ore", needs a chain, and a chain
+    #: is one chance in a million on rotations alone. Measured over 177 archived episodes:
+    #: 5,719 conveyors placed and one line that ever met end to end. It has therefore never
+    #: been paid and has never taught anything. Landing on ore turns that cliff into a step
+    #: the agent already clears, since it places a first drill in most episodes.
+    #:
+    #: Meant to be removed as the agent copes, not kept. Left out, placement is the
+    #: engine's own.
+    ore_near: str | None = None
+
     #: Items placed in the core on load. A sector loaded directly comes up empty.
     loadout: dict[str, int] | None = None
 
