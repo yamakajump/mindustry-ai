@@ -63,12 +63,30 @@ class PolicyNet(nn.Module):
         n_blocks: int,
         n_rotations: int = 4,
         hidden: int = 256,
+        position_set_of_type: tuple[int, ...] | None = None,
+        block_of_type: tuple[bool, ...] | None = None,
+        rotation_of_type: tuple[bool, ...] | None = None,
     ) -> None:
         super().__init__()
         self.window = window
         self.n_types = n_types
         self.n_blocks = n_blocks
         self.n_rotations = n_rotations
+
+        # What each action type actually cares about. Registered as buffers so they travel
+        # with the network to whichever device it lives on, and so a checkpoint carries the
+        # action layout it was trained under rather than trusting the caller to rebuild it
+        # the same way. Defaults keep every type looking at everything, which is what the
+        # network did before it was told the difference.
+        self.register_buffer("position_set_of_type", torch.as_tensor(
+            position_set_of_type if position_set_of_type is not None else (0,) * n_types,
+            dtype=torch.long), persistent=False)
+        self.register_buffer("block_of_type", torch.as_tensor(
+            block_of_type if block_of_type is not None else (True,) * n_types,
+            dtype=torch.bool), persistent=False)
+        self.register_buffer("rotation_of_type", torch.as_tensor(
+            rotation_of_type if rotation_of_type is not None else (True,) * n_types,
+            dtype=torch.bool), persistent=False)
 
         self.trunk = nn.Sequential(
             layer_init(nn.Conv2d(channels, 32, 5, stride=2, padding=2)), nn.ReLU(),
@@ -147,6 +165,46 @@ class PolicyNet(nn.Module):
     def value(self, spatial: torch.Tensor, globals_: torch.Tensor) -> torch.Tensor:
         return self.head_value(self.features(spatial, globals_)).squeeze(-1)
 
+    def _aimable(self, masks: dict[str, torch.Tensor],
+                 kind: torch.Tensor) -> torch.Tensor | None:
+        """The tiles the chosen action can actually target, one row per sample."""
+        sets = masks.get("position_sets")
+        if sets is None:
+            # Callers that predate the named sets, and the tests that pin the old shape.
+            return masks.get("position")
+
+        which = self.position_set_of_type.to(kind.device)[kind]
+        rows = torch.arange(sets.shape[0], device=sets.device)
+        chosen = sets[rows, which]
+
+        # A row with nothing legal would make the categorical undefined. It happens when
+        # the type mask and the set disagree, which should not occur and must not crash a
+        # run at three in the morning if it does.
+        empty = ~chosen.any(dim=-1)
+        if bool(empty.any()):
+            chosen = chosen.clone()
+            chosen[empty] = True
+        return chosen
+
+    @staticmethod
+    def _relevant(mask: torch.Tensor | None, matters: torch.Tensor,
+                  kind: torch.Tensor, width: int) -> torch.Tensor:
+        """The real mask where the choice means something, one fixed option where it does not.
+
+        A single allowed option makes the head deterministic: its log probability is zero
+        and so is its entropy, so an irrelevant dimension stops adding noise to the ratio
+        and stops being pushed towards uniform by the entropy bonus. Measured before this
+        existed, the rotation head sat at 1.380 against a maximum of 1.386 across 1.5M
+        steps and never moved, because nothing but the bonus ever touched it.
+        """
+        useful = matters.to(kind.device)[kind]
+        if mask is None:
+            mask = torch.ones((kind.shape[0], width), dtype=torch.bool, device=kind.device)
+
+        pinned = torch.zeros_like(mask)
+        pinned[:, 0] = True
+        return torch.where(useful[:, None], mask, pinned)
+
     def act(
         self,
         spatial: torch.Tensor,
@@ -164,15 +222,32 @@ class PolicyNet(nn.Module):
         spatial_map = self.trunk_map(spatial)
         features = self.body_of(spatial_map, globals_)
 
+        # The type is decided first, and everything else is masked against it.
+        #
+        # Sampling all four independently means one position mask has to serve every type,
+        # and there is no mask that can. `free` is right for building and exactly inverted
+        # for breaking, so for as long as they shared one, every tile the agent could aim
+        # at while breaking was guaranteed to hold nothing: 6,660 demolitions over 30
+        # episodes, of which 23 hit a building it had placed, while `break` was 30% of
+        # everything it did. The same independence made it pick a block and a rotation on
+        # a `move`, which go nowhere and whose log probability lands in the ratio anyway.
+        type_head = MaskedCategorical(self.head_type(features), masks.get("type"))
+        kind = type_head.sample() if action is None else action[:, 0]
+
         heads = [
-            MaskedCategorical(self.head_type(features), masks.get("type")),
-            MaskedCategorical(self.head_block(features), masks.get("block")),
-            MaskedCategorical(self.positions(spatial_map, features), masks.get("position")),
-            MaskedCategorical(self.head_rotation(features), masks.get("rotation")),
+            type_head,
+            MaskedCategorical(self.head_block(features),
+                              self._relevant(masks.get("block"), self.block_of_type, kind,
+                                             self.n_blocks)),
+            MaskedCategorical(self.positions(spatial_map, features),
+                              self._aimable(masks, kind)),
+            MaskedCategorical(self.head_rotation(features),
+                              self._relevant(masks.get("rotation"), self.rotation_of_type,
+                                             kind, self.n_rotations)),
         ]
 
         if action is None:
-            picks = [head.sample() for head in heads]
+            picks = [kind, *(head.sample() for head in heads[1:])]
         else:
             picks = [action[:, i] for i in range(4)]
 

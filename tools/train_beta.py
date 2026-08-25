@@ -94,6 +94,11 @@ def showcase_policy(net: PolicyNet, window: int, device: str):
                     "type": torch.as_tensor(mask["type"][None], device=device),
                     "block": torch.as_tensor(mask["block"][None], device=device),
                     "position": torch.as_tensor(mask["position"].reshape(1, -1), device=device),
+                    # The showcase match plays with the same masks the trainer uses, or it
+                    # is not showing the policy that is being trained.
+                    "position_sets": torch.as_tensor(
+                        mask["position_sets"].reshape(1, mask["position_sets"].shape[0], -1),
+                        device=device),
                 },
             )
             return net.to_env_action(action)[0]
@@ -402,9 +407,15 @@ class EnvWorker:
                     pass
 
 
-def stack_masks(infos, window: int, n_types: int, n_blocks: int) -> dict[str, np.ndarray]:
-    """Collect per-environment masks into batched arrays the network can use."""
-    types, blocks, positions = [], [], []
+def stack_masks(infos, window: int, n_types: int, n_blocks: int,
+                n_sets: int = 4) -> dict[str, np.ndarray]:
+    """Collect per-environment masks into batched arrays the network can use.
+
+    `position_sets` is one plane per kind of target, so the network can pick the right one
+    once it has chosen the action type. Sending a single position mask meant one mask had
+    to serve building and breaking at once, and those two want opposite sets of tiles.
+    """
+    types, blocks, positions, sets = [], [], [], []
     for info in infos:
         mask = info.get("action_mask", {})
         types.append(mask.get("type", np.ones(n_types, bool)))
@@ -415,10 +426,16 @@ def stack_masks(infos, window: int, n_types: int, n_blocks: int) -> dict[str, np
             position = np.ones((window, window), bool)
         positions.append(position.reshape(-1))
 
+        planes = mask.get("position_sets")
+        if planes is None:
+            planes = np.repeat(position[None], n_sets, axis=0)
+        sets.append(planes.reshape(planes.shape[0], -1))
+
     return {
         "type": np.array(types),
         "block": np.array(blocks),
         "position": np.array(positions),
+        "position_sets": np.array(sets),
     }
 
 
@@ -588,12 +605,23 @@ def main() -> None:
     infos = [info for _, info in first]
 
     sample = observations[0]
+
+    # Asked of a real environment rather than rebuilt from constants. The action list
+    # grows with what the environment offers, and every time this project reconstructed it
+    # from a module constant instead, something went missing without a word: a whole action
+    # type was unreachable for a day that way.
+    layout = alive[0].env
     config = PPOConfig()
     net = PolicyNet(
         channels=sample["spatial"].shape[0],
         window=args.window,
         globals_size=sample["global"].shape[0],
         n_types=len(infos[0]["action_mask"]["type"]),
+        # The action layout, taken from the environment rather than assumed. A network
+        # that thinks every type aims at the same tiles is the network this project had.
+        position_set_of_type=layout.position_set_of_type,
+        block_of_type=layout.block_of_type,
+        rotation_of_type=layout.rotation_of_type,
         n_blocks=len(infos[0]["action_mask"]["block"]),
     )
     agent = PPO(net, config)

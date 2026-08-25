@@ -132,16 +132,27 @@ class LocalWindow:
             if key in masks and masks[key].ndim == 2:
                 local[key] = self._crop_mask(masks[key])
 
-        # A type is only legal if something in the window supports it. Otherwise the agent
-        # picks "build", finds no legal tile nearby, and is refused for reasons it cannot
-        # see from its own observation.
-        if "type" in local:
+        # One plane per position set, cropped the same way. Missing this would hand the
+        # network full-map masks against a windowed observation, which is the same class
+        # of mismatch as reading world coordinates out of a window: it does not raise.
+        if "position_sets" in masks and masks["position_sets"].ndim == 3:
+            local["position_sets"] = np.stack(
+                [self._crop_mask(plane) for plane in masks["position_sets"]])
+
+        # A type is only legal if the set it aims into holds something inside the window.
+        # Otherwise the agent picks "build", finds no legal tile nearby, and is refused for
+        # reasons it cannot see from its own observation.
+        #
+        # Against its own set, not against the union: gating "build" on everything any
+        # action could target lets it stay legal because a wall is breakable somewhere,
+        # which is the same confusion that made breaking impossible to aim.
+        if "type" in local and "position_sets" in local:
+            sets = local["position_sets"]
+            available = [bool(plane.any()) for plane in sets]
             types = local["type"].copy()
-            for index, name in enumerate(self.env.action_types):
-                if name in ("place", "build") and "position" in local:
-                    types[index] = types[index] and bool(local["position"].any())
-                if name == "mine" and "mineable" in local:
-                    types[index] = types[index] and bool(local["mineable"].any())
+            for index, which in enumerate(self.env.position_set_of_type):
+                if which < len(available):
+                    types[index] = types[index] and available[which]
             local["type"] = types
 
         out = dict(info)

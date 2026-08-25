@@ -52,6 +52,39 @@ STAMP = "stamp"
 #: do. Fixed designs remain, for factories, where a layout owes nothing to the terrain.
 CONNECT = "connect"
 
+#: The distinct sets of tiles an action can aim at, in the order they are sent.
+#:
+#: One position head serves every action type and cannot know which was chosen, so it was
+#: given one mask for all of them: `free`, meaning buildable, empty and not solid. Right
+#: for building and exactly inverted for breaking, since `free` and `owned` are disjoint by
+#: construction. Measured over 30 archived episodes, 6,660 demolitions of which 23 hit a
+#: building the agent had placed, while `break` was 30% of everything it did.
+#:
+#: Naming the sets lets the network pick the right one once it knows the type, which is why
+#: the type is now sampled first. The union that came before removed the impossibility and
+#: left the ambiguity: the agent could aim at a building when breaking, and nothing made it.
+POSITION_SETS = ("free", "owned", "mineable", "any")
+
+#: Which set each action type aims into. Anything unnamed falls back to `any`, which is
+#: honest for an action whose target is not a tile at all.
+POSITION_OF_TYPE = {
+    "place": "free", "build": "free", "stamp": "free",
+    "break": "owned",
+    "mine": "mineable", "connect": "mineable",
+    "move": "any", "noop": "any", "unload": "any",
+}
+
+#: Types for which the block and rotation choices mean anything.
+#:
+#: A factored action carries all four every step, so on a `move` the policy still picks a
+#: block and a rotation that go nowhere. Their log probability enters the importance ratio
+#: regardless, which is noise, and the entropy bonus keeps pushing them towards uniform
+#: because no gradient ever tells them otherwise: measured over 1.5M steps, the rotation
+#: head sat at 1.38 against a maximum of 1.386 and never moved. Masked to a single option
+#: they contribute exactly zero to both.
+BLOCK_MATTERS = frozenset({"place", "build", "stamp"})
+ROTATION_MATTERS = frozenset({"place", "build"})
+
 #: Action types when the agent inhabits a unit, which is what a player can do.
 #: Building is queued rather than applied, and only completes once the unit is in range.
 EMBODIED_ACTION_TYPES = ("noop", "move", "build", "mine", "unload", "break")
@@ -366,6 +399,20 @@ class MindustryEnv(gym.Env):
             self._build_spaces(obs)
 
     @property
+    def position_set_of_type(self) -> tuple[int, ...]:
+        """For each action type, the index into `POSITION_SETS` it aims into."""
+        return tuple(POSITION_SETS.index(POSITION_OF_TYPE.get(name, "any"))
+                     for name in self.action_types)
+
+    @property
+    def block_of_type(self) -> tuple[bool, ...]:
+        return tuple(name in BLOCK_MATTERS for name in self.action_types)
+
+    @property
+    def rotation_of_type(self) -> tuple[bool, ...]:
+        return tuple(name in ROTATION_MATTERS for name in self.action_types)
+
+    @property
     def action_types(self) -> tuple[str, ...]:
         base = EMBODIED_ACTION_TYPES if self.embodied else DIRECT_ACTION_TYPES
         base = base + (CONNECT,) if self.mining else base
@@ -612,11 +659,14 @@ class MindustryEnv(gym.Env):
                 legal.append(bool(free.any()))
             if self.designs:
                 legal.append(bool(block_mask.any() and free.any()))
-            # `free | owned` for the same reason as the embodied branch below: one
-            # position head serves every action type, and `free` alone makes breaking
-            # impossible to aim because the two sets are disjoint by construction.
-            return {"type": np.array(legal, dtype=bool),
-                    "block": block_mask, "position": free | owned}
+            return {
+                "type": np.array(legal, dtype=bool),
+                "block": block_mask,
+                # The union, kept for callers that take one mask for every type. The
+                # network uses the named sets below and never sees this.
+                "position": free | owned,
+                "position_sets": np.stack([free, owned, np.zeros_like(free), free | owned]),
+            }
 
         unit = obs.get("unit", {})
         carrying = int(unit.get("carrying", 0))
@@ -688,6 +738,11 @@ class MindustryEnv(gym.Env):
             # mask. This removes the impossibility; it does not remove the ambiguity.
             "position": free | owned | mineable,
             "mineable": mineable,
+            # One plane per entry of POSITION_SETS, so the network can pick the right one
+            # once it knows which action it is taking. `any` is everything a legal action
+            # could target rather than literally every tile: a policy aiming a `move` at a
+            # wall learns nothing except that walls refuse it.
+            "position_sets": np.stack([free, owned, mineable, free | owned | mineable]),
         }
 
     # Gym API ---------------------------------------------------------------------

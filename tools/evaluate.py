@@ -134,6 +134,13 @@ def network_policy(net: PolicyNet, device: str):
                 "position": torch.as_tensor(
                     mask["position"].reshape(1, -1), device=device
                 ),
+                # Without this the network falls back to the single position mask, which
+                # cannot be right for more than one action type at a time. A policy
+                # evaluated that way is not the policy that was trained.
+                "position_sets": torch.as_tensor(
+                    mask["position_sets"].reshape(1, mask["position_sets"].shape[0], -1),
+                    device=device,
+                ),
             }
             action, _, _, _ = net.act(spatial, globals_, masks)
             return net.to_env_action(action)[0]
@@ -219,6 +226,12 @@ def main() -> None:
             globals_size=observation["global"].shape[0],
             n_types=len(info["action_mask"]["type"]),
             n_blocks=len(info["action_mask"]["block"]),
+            # The action layout, asked of the environment being evaluated on. A network
+            # built without it treats every action type as aiming at the same tiles, which
+            # is what the trained weights were not trained to do.
+            position_set_of_type=env.position_set_of_type,
+            block_of_type=env.block_of_type,
+            rotation_of_type=env.rotation_of_type,
         )
         device = PPOConfig().device
         net.load_state_dict(torch.load(args.checkpoint, map_location=device)["net"])
