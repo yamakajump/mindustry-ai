@@ -670,6 +670,26 @@ CURRICULUM: dict[str, Task] = {
 }
 
 
+def reached(task: "Task", obs: Observation) -> frozenset[str]:
+    """Milestones an episode has crossed, asked of the task rather than the observation.
+
+    Necessary since the automation and variety rungs moved onto the reward's ledger: they
+    read `credited`, which lives in the reward and not in the observation, so anything
+    checking `stone.read(obs)` directly reports them as never reached however well the
+    episode went. Two callers were doing exactly that, the evaluator and the dashboard,
+    and both were quietly under-reporting the only rungs the project cares about.
+    """
+    ledger = {}
+    scorer = task.reward
+    if hasattr(scorer, "credited"):
+        ledger = {"credited": scorer.credited, "credited_variety": len(scorer.varieties)}
+
+    full = {**obs, **ledger}
+    return frozenset(
+        stone.name for stone in MILESTONES if stone.read(full) >= stone.threshold
+    )
+
+
 def get(name: str) -> Task:
     """The task by name, with a reward of its own if the reward keeps state.
 

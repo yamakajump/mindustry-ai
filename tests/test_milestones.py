@@ -313,3 +313,23 @@ def test_sand_does_not_buy_the_variety_milestones() -> None:
     with_lead = scorer(before, state(produced={"copper": 50, "lead": 40}))
 
     assert with_lead - with_sand == pytest.approx(20.0 + 40 * 0.7 * 0.1)
+
+
+def test_reached_reads_the_ledger_not_the_observation() -> None:
+    """The rungs that matter do not live in the observation, and two callers forgot.
+
+    `automation` and `two_ores` moved onto the reward's per-episode ledger when a windfall
+    turned out to be able to buy them. Anything checking `stone.read(obs)` afterwards
+    reports them as never reached however well the episode went, because no observation
+    carries a ledger. The evaluator and the dashboard were both doing exactly that.
+    """
+    task = tasks.get("frontier")
+    task.reward.reset()
+
+    landed = state(produced={"copper": 400, "lead": 400})
+    task.reward(state(), landed)
+
+    assert "automation" in tasks.reached(task, landed)
+    assert "automation" not in {
+        stone.name for stone in tasks.MILESTONES if stone.read(landed) >= stone.threshold
+    }, "the observation alone cannot know, which is the whole point"

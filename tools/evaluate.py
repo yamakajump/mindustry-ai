@@ -47,6 +47,8 @@ class Outcome:
     produced: int
     #: Milestones the episode reached, by name.
     reached: frozenset[str]
+    #: Whether the core was still standing when the episode ended.
+    survived: bool
 
 
 def summarise(name: str, outcomes: list[Outcome]) -> dict:
@@ -72,6 +74,8 @@ def summarise(name: str, outcomes: list[Outcome]) -> dict:
         "mean_built": round(statistics.fmean(o.built for o in outcomes), 1) if outcomes else 0,
         "mean_produced": round(statistics.fmean(o.produced for o in outcomes), 1) if outcomes else 0,
         "solved": sum(o.solved for o in outcomes),
+        "survived": round(
+            statistics.fmean(o.survived for o in outcomes), 3) if outcomes else 0.0,
         # How often each rung of the ladder was reached, which says far more than a mean
         # reward does. A policy that never once reaches `automation` has not started
         # playing the game, whatever its score.
@@ -106,11 +110,12 @@ def play(env, policy, task, steps: int) -> Outcome:
         built=int(raw.get("built", 0)),
         solved=bool(task.succeeded(raw)),
         produced=sum(int(a) for a in raw.get("produced", {}).values()),
-        # Read off the final observation rather than accumulated along the way: every
-        # milestone counter is cumulative, so the last one holds the whole episode.
-        reached=frozenset(
-            stone.name for stone in tasks.MILESTONES if stone.read(raw) >= stone.threshold
-        ),
+        # Asked of the task, not of the observation: the automation and variety rungs
+        # read the reward's ledger, which no observation carries.
+        reached=tasks.reached(task, raw),
+        #: Whether the base was still standing. Half of what a run is judged on, and it
+        #: was not being measured at all.
+        survived=bool(raw.get("has_core", False)),
     )
 
 
@@ -239,6 +244,7 @@ def main() -> None:
             f"wave {summary['mean_wave']:5.2f}  built {summary['mean_built']:6.1f}  "
             f"produced {summary['mean_produced']:8.1f}  "
             f"solved {summary['solved']}/{summary['episodes']}  "
+            f"core tenu {summary['survived']:.0%}  "
             f"over {summary['sectors']} unseen sectors",
             flush=True,
         )

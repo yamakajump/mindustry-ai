@@ -325,10 +325,10 @@ class EnvWorker:
                 # Read off the current observation rather than accumulated: every
                 # milestone counter is cumulative within an episode, so the latest one
                 # already holds everything reached so far.
-                state.reached = [
-                    stone.name for stone in tasks.MILESTONES
-                    if stone.read(raw) >= stone.threshold
-                ]
+                # Asked of the task rather than read off the observation: the automation
+                # and variety rungs live on the reward's ledger, so checking the
+                # observation reports the only rungs that matter as never reached.
+                state.reached = sorted(tasks.reached(task, raw))
                 state.unit = dict(raw.get("unit", {}))
                 state.action = env.action_types[int(action[0])]
                 state.core = [int(raw.get("core_x", -1)), int(raw.get("core_y", -1))]
