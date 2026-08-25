@@ -22,6 +22,8 @@ def state(**fields) -> dict:
         "core_max_health": 4000.0,
         "items": {"copper": 300, "lead": 300},
         "produced": {},
+        "crafting": 0.0,
+        "power": 0.0,
         "placed": {},
         "stats": {},
         "unit": {"carrying": 0},
@@ -80,15 +82,16 @@ def test_thresholds_crossed_in_one_step_all_pay(reward) -> None:
     only the top one. Rewarding the highest crossed would make a slow climb worth more
     than a fast one."""
     once = reward(state(), state(produced={"copper": 1_000}))
-    assert once == pytest.approx(30.0 + 30.0 + 60.0 + 1_000 * 0.02)
+    assert once == pytest.approx(30.0 + 30.0 + 60.0 + 1_000 * 0.1)
 
 
 # Automation against hand mining -------------------------------------------------------
 
 
-def test_a_machine_is_worth_ten_hands(reward) -> None:
+def test_a_machine_is_worth_fifty_hands(reward) -> None:
     """Same ore in the core, different origin. If hand mining ever paid as well, the agent
-    would have no reason to build anything."""
+    would have no reason to build anything, and the gap widened when delivery was
+    reweighted so that producing outearns hiding."""
     machine = reward(
         state(produced={"copper": 500}, items={"copper": 800}),
         state(produced={"copper": 600}, items={"copper": 900}),
@@ -97,7 +100,7 @@ def test_a_machine_is_worth_ten_hands(reward) -> None:
         state(produced={"copper": 500}, items={"copper": 800}),
         state(produced={"copper": 500}, items={"copper": 900}),
     )
-    assert machine == pytest.approx(hand * 10)
+    assert machine == pytest.approx(hand * 50)
 
 
 def test_spending_on_a_drill_is_not_punished(reward) -> None:
@@ -113,11 +116,11 @@ def test_spending_on_a_drill_is_not_punished(reward) -> None:
 
 def test_a_kill_pays_and_keeps_paying(reward) -> None:
     """Unlike the ladder, killing is a rate: a turret that keeps working keeps earning."""
-    assert reward(state(), state(stats={"enemy_units_destroyed": 1})) == pytest.approx(21.0)
+    assert reward(state(), state(stats={"enemy_units_destroyed": 1})) == pytest.approx(22.0)
     assert reward(
         state(stats={"enemy_units_destroyed": 5}),
         state(stats={"enemy_units_destroyed": 6}),
-    ) == pytest.approx(1.0)
+    ) == pytest.approx(2.0)
 
 
 def test_losing_the_core_costs_more_than_any_episode_earns_by_luck(reward) -> None:
@@ -160,3 +163,37 @@ def test_every_milestone_reads_a_counter_that_only_climbs() -> None:
     )
     for stone in tasks.MILESTONES:
         assert stone.read(empty) < stone.threshold <= stone.read(full), stone.name
+
+
+# Work at the consumer, wherever the consumer is -------------------------------------------
+
+
+def test_a_factory_doing_work_pays_without_anything_reaching_the_core(reward) -> None:
+    """The hypothesis this reward used to rest on, and it was wrong: value is not arrival
+    at the core. A conveyor feeding a graphite press delivers nothing there, and it is the
+    point of the game."""
+    assert reward(state(), state(crafting=12.0)) == pytest.approx(6.0)
+
+
+def test_a_generator_running_pays_while_it_runs(reward) -> None:
+    """Instantaneous rather than cumulative: it says a fuel line exists right now."""
+    assert reward(state(), state(power=4.0)) == pytest.approx(0.2)
+
+
+def test_a_loop_of_conveyors_earns_nothing(reward) -> None:
+    """Counting transfers would let a closed loop carrying one item forever pay without
+    end. Counting work at the consumer cannot, because a loop has no consumer."""
+    turning = state(items={"copper": 300}, produced={}, crafting=0.0, power=0.0)
+    assert reward(turning, turning) == 0.0
+
+
+def test_producing_outearns_hiding(reward) -> None:
+    """The balance the old weights got backwards. Measured on thirty held-out episodes:
+    the trained policy beat a coward's ceiling while delivering nothing, because a lost
+    core cost fifty against a plausible ten for a whole episode of production."""
+    produced_then_died = reward(
+        state(), state(produced={"copper": 1_000}, has_core=False, core_health=0.0)
+    )
+    hid_and_survived = reward(state(), state(wave=8))
+
+    assert produced_then_died > hid_and_survived

@@ -212,6 +212,52 @@ def _variety(obs: Observation) -> int:
     return sum(1 for amount in obs.get("produced", {}).values() if int(amount) > 0)
 
 
+def _crafting(obs: Observation) -> float:
+    """Work the team's factories have actually done, cumulative.
+
+    Accumulates only while a crafter is warm and producing, so a change between two steps
+    is work rather than ownership. A press standing idle for want of coal contributes
+    nothing, which is the distinction that matters.
+    """
+    return float(obs.get("crafting", 0.0))
+
+
+def _power(obs: Observation) -> float:
+    """How much generation is running right now.
+
+    Instantaneous rather than cumulative on purpose: it says a generator is burning
+    something at this moment, which is what a working fuel line amounts to.
+    """
+    return float(obs.get("power", 0.0))
+
+
+def _consumed(before: Observation, after: Observation) -> float:
+    """Everything the team's machines consumed usefully this step.
+
+    Delivery to the core used to be the whole measure of value, and it is far too narrow:
+    a conveyor feeding a graphite press delivers nothing to the core, and a conveyor
+    feeding a turret delivers nothing to the core, yet both are the point of the game. A
+    reward built on core arrivals is blind to most of what a factory is for, and it would
+    have stayed blind as the agent climbed.
+
+    So the measure is work done at the consumer, wherever the consumer is. One number
+    instead of a rule per building, and it generalises to every tier the game has without
+    anything being added.
+
+    It is also not farmable the way counting transfers would be. A closed loop of
+    conveyors carrying the same item forever would register transfers without end; it
+    registers no work at all, because a loop has no consumer.
+    """
+    delivered = _produced(after) - _produced(before)
+    crafted = _crafting(after) - _crafting(before)
+    generating = _power(after)
+
+    # Weighted by how deep in the game each one sits. Crafting is two production lines
+    # meeting and is worth more per unit than ore arriving; power is a precondition for
+    # the tier above and is worth acknowledging while it runs.
+    return max(0.0, delivered) * 0.1 + max(0.0, crafted) * 0.5 + generating * 0.05
+
+
 def _placed(category: str) -> Callable[[Observation], int]:
     """Blocks fully built in one of the game's categories, cumulative over the episode."""
 
@@ -337,10 +383,17 @@ def _build_and_hold() -> Callable[[Observation, Observation], float]:
       watch for once it can, not a hole today.
     - Hand mining pays a tenth of automated delivery, so carrying ore in by hand is always
       the worse way to earn the same reward.
+
+    The continuous term measures **work done at a consumer**, not arrival at the core. The
+    narrower version was blind to most of the game: a conveyor feeding a factory or a
+    turret delivers nothing to the core, and those are what a factory is for. It is also
+    weighted so that producing outearns hiding, which the old one was not. Measured on
+    thirty held-out episodes at the old weights: the trained policy scored above a coward's
+    ceiling and delivered nothing at all, while a random policy delivered more, because a
+    lost core cost fifty against a plausible ten for a whole episode of production.
     """
 
     def reward(before: Observation, after: Observation) -> float:
-        automated = _produced(after) - _produced(before)
         kills = _stat("enemy_units_destroyed")(after) - _stat("enemy_units_destroyed")(before)
         lost = _stat("buildings_destroyed")(after) - _stat("buildings_destroyed")(before)
         damage = float(before.get("core_health", 0.0)) - float(after.get("core_health", 0.0))
@@ -348,18 +401,22 @@ def _build_and_hold() -> Callable[[Observation, Observation], float]:
 
         return (
             milestones(before, after)
-            # Flow. Ten thousand ore delivered is worth about as much as the whole ladder
-            # of milestones, which is the balance we want: the ladder gets it started, and
-            # production is what there is left to optimise once it is going.
-            + automated * 0.02
+            # What the machines did, wherever they did it. Weighted so that an economy
+            # that works outearns one that merely survives: a base delivering a thousand
+            # ore is worth a hundred points against the fifty a lost core costs, where at
+            # the old weight the whole plausible production of an episode came to ten and
+            # not dying was worth five times playing.
+            + _consumed(before, after)
             # A tenth of that for ore carried in by hand, and a little for picking it up at
             # all. Without the second term the first thousand steps of a fresh policy carry
             # no gradient whatsoever, because nothing at all happens.
             + _banked_by_hand(before, after) * 0.002
             + _carrying(0.001)(before, after)
-            + kills * 1.0
+            # A turret that fires is a supply line that works, which is why this is worth
+            # more than a wave that passes on a timer.
+            + kills * 2.0
             + lost * -0.5
-            + waves * 2.0
+            + waves * 1.0
             + max(0.0, damage) * -0.005
             + (-50.0 if before.get("has_core") and not after.get("has_core") else 0.0)
         )

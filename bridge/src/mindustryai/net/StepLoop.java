@@ -967,6 +967,36 @@ public class StepLoop implements ApplicationListener {
             }
         }
 
+        // What the team's machines have actually done, as opposed to what it owns.
+        //
+        // Delivery to the core was the only measure of value here, and it is far too
+        // narrow: a conveyor feeding a graphite press delivers nothing to the core, and a
+        // conveyor feeding a turret delivers nothing to the core, yet both are the point
+        // of the game. Counting work done at the consumer covers every useful destination
+        // with one number instead of a rule per building.
+        //
+        // It also cannot be farmed by a loop of conveyors carrying the same item in a
+        // circle, which counting transfers could: a loop has no consumer, so it does no
+        // work.
+        double crafting = 0.0;
+        double power = 0.0;
+        if (playing && Vars.state.rules != null) {
+            for (var build : Vars.state.rules.defaultTeam.data().buildings) {
+                // Accumulates only while the crafter is warm and actually producing, so
+                // its change between two steps is work rather than ownership.
+                if (build instanceof mindustry.world.blocks.production.GenericCrafter.GenericCrafterBuild crafter) {
+                    crafting += crafter.totalProgress;
+                }
+                // Instantaneous rather than cumulative: it says a generator is burning
+                // something right now, which is what a fuel line existing means.
+                if (build instanceof mindustry.world.blocks.power.PowerGenerator.GeneratorBuild generator) {
+                    power += generator.productionEfficiency;
+                }
+            }
+        }
+        obs.put("crafting", crafting);
+        obs.put("power", power);
+
         obs.put("stats", stats);
         obs.put("produced", produced);
         obs.put("placed", placed);
