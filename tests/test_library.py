@@ -161,13 +161,19 @@ def test_a_library_adds_one_action_type_and_no_more() -> None:
     from gamma.env import DIRECT_ACTION_TYPES, MindustryEnv
 
     bare = MindustryEnv.__new__(MindustryEnv)
-    bare.embodied, bare.designs = False, ()
+    bare.embodied, bare.designs, bare.mining = False, (), False
     assert bare.action_types == DIRECT_ACTION_TYPES
 
     stocked = MindustryEnv.__new__(MindustryEnv)
-    stocked.embodied, stocked.designs = False, (trunk(),)
+    stocked.embodied, stocked.designs, stocked.mining = False, (trunk(),), False
     assert stocked.action_types == DIRECT_ACTION_TYPES + ("stamp",)
     assert set(DIRECT_ACTION_TYPES) < set(stocked.action_types)
+
+    # And the computed extraction macro, which is a different offer: a design is a shape
+    # remembered, a connect is a shape worked out from the ore that is there.
+    both = MindustryEnv.__new__(MindustryEnv)
+    both.embodied, both.designs, both.mining = False, (trunk(),), True
+    assert both.action_types == DIRECT_ACTION_TYPES + ("connect", "stamp")
 
 
 def test_more_designs_than_the_block_dimension_is_refused(tmp_path) -> None:

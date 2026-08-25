@@ -230,6 +230,20 @@ class ReplayRecorder:
                 # episode never pays anything into the core, so it cannot afford the
                 # blocks it went on to build and the replay diverges from what happened.
                 frame["act"] = {"t": "unload"}
+            elif kind == "connect":
+                # Drills worked out from the ore that was there, and the belt that brings
+                # it home. Recorded like a stamp, with its cells, or a replay shows an
+                # agent that built nothing.
+                frame["act"] = {
+                    "t": "connect",
+                    "x": int(outcome.get("x", 0)), "y": int(outcome.get("y", 0)),
+                    "drills": int(outcome.get("drills", 0)),
+                    "believed": int(outcome.get("believed_ore", 0)),
+                    "origin": outcome.get("origin") or [0, 0],
+                    "laid": int(outcome.get("laid", 0)),
+                    "asked": int(outcome.get("asked", 0)),
+                    "cells": outcome.get("cells") or [],
+                }
             elif kind == "stamp":
                 # A whole structure in one decision, so the frame carries how much of it
                 # the world actually accepted. `asked` against `laid` is the difference

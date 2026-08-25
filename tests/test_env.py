@@ -17,7 +17,10 @@ def test_spaces_are_available_before_the_first_reset(env: MindustryEnv) -> None:
     """Gymnasium callers build policies from the spaces, so asking early must work."""
     assert isinstance(env.action_space, spaces.MultiDiscrete)
     assert isinstance(env.observation_space, spaces.Dict)
-    assert env.action_space.nvec[0] == len(ACTION_TYPES)
+    # Against the environment's own list, not the module constant: the list grows with
+    # what the environment offers, and comparing to the constant is how a whole action
+    # type stayed unreachable for a day.
+    assert env.action_space.nvec[0] == len(env.action_types)
     assert env.action_space.nvec[1] == len(env.blocks)
 
 
@@ -101,7 +104,7 @@ def test_alpha_beats_random_on_t1(env: MindustryEnv) -> None:
         alpha = AlphaPolicy(env)
         alpha.reset()
         scripted = run_episode(env, alpha)
-        chaotic = run_episode(env, MaskedRandomPolicy(env.action_space, seed=0))
+        chaotic = run_episode(env, MaskedRandomPolicy(env.action_space, seed=0, env=env))
     finally:
         env.task = tasks.T1_COPPER
 

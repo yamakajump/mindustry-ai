@@ -21,7 +21,7 @@ from typing import Any, Iterator
 
 import numpy as np
 
-from gamma.env import ACTION_TYPES
+from gamma.env import ACTION_TYPES  # noqa: F401  (kept for callers that import it)
 
 #: Mindustry rotations, indexed by (dx, dy) of the direction of travel.
 _ROTATIONS = {(1, 0): 0, (0, 1): 1, (-1, 0): 2, (0, -1): 3}
@@ -75,6 +75,16 @@ class AlphaPolicy:
     def _block_index(self, name: str) -> int:
         return self.env.blocks.index(name)
 
+    def _type_index(self, name: str) -> int:
+        """From the environment, never from the module constant.
+
+        The list of action types grows with what the environment offers: a body adds
+        `move` and `mine`, a design library adds `stamp`, ore in view adds `connect`.
+        Indexing a fixed constant into a longer space picks the wrong action, silently,
+        and the same mistake in the mask hid one action type from the network for a day.
+        """
+        return self.env.action_types.index(name)
+
     def _plan_actions(self, info: dict[str, Any]) -> Iterator[np.ndarray]:
         raw = info["raw"]
         spatial = raw["spatial"]
@@ -104,13 +114,13 @@ class AlphaPolicy:
             chosen += 1
 
             yield np.array(
-                [ACTION_TYPES.index("place"), self._block_index("mechanical-drill"),
+                [self._type_index("place"), self._block_index("mechanical-drill"),
                  spot[0], spot[1], 0],
                 dtype=np.int64,
             )
             for x, y, rotation in _route(spot, core):
                 yield np.array(
-                    [ACTION_TYPES.index("place"), self._block_index("conveyor"),
+                    [self._type_index("place"), self._block_index("conveyor"),
                      x, y, rotation],
                     dtype=np.int64,
                 )

@@ -20,6 +20,7 @@ import numpy as np
 from gymnasium import spaces
 
 from gamma.bridge import Bridge
+from gamma import mining, tasks
 from gamma.adapt import route, split
 from gamma.sectors import SectorPool, build_pool
 from gamma.server import ServerProcess, install_plugin
@@ -31,6 +32,25 @@ DIRECT_ACTION_TYPES = ("noop", "place", "break")
 
 #: Added on top of either space when the environment is given a design library.
 STAMP = "stamp"
+
+#: Put drills on the ore that is actually there, and run a belt home.
+#:
+#: The action the project needed and did not have. A conveyor line placed one tile at a
+#: time is never finished: across 177 archived episodes the agent laid 5,719 conveyors and
+#: completed one line. A fixed structure finishes, and lands on the wrong ground: the one
+#: design it had put 21,330 drills down over 25 episodes with 89.9% of them on bare rock,
+#: because generated ore is a blob of arbitrary shape and a pattern bred on one map is a
+#: pattern for that map.
+#:
+#: So the geometry is computed from what is under the anchor, and only the geometry.
+#: Measured over a thousand random anchors on real maps, the packer puts 100% of its
+#: drills on ore and fills 3.95 of each drill's four tiles.
+#:
+#: What stays with the policy is every decision worth calling one: which patch, when, how
+#: much of the episode to spend on economy before defence. What leaves it is spelling a
+#: line out tile by tile, which is a motor skill rather than a choice, and which it cannot
+#: do. Fixed designs remain, for factories, where a layout owes nothing to the terrain.
+CONNECT = "connect"
 
 #: Action types when the agent inhabits a unit, which is what a player can do.
 #: Building is queued rather than applied, and only completes once the unit is in range.
@@ -100,6 +120,7 @@ class MindustryEnv(gym.Env):
         designs: tuple = (),
         window: int = 0,
         capture_scene: bool = False,
+        mining: bool = True,
     ) -> None:
         super().__init__()
         self.task = task
@@ -132,6 +153,9 @@ class MindustryEnv(gym.Env):
         # An embodied agent plays as a player: it must travel to what it builds and mine
         # by hand. Slower to train, and the only setting that matches the real game.
         self.embodied = embodied
+
+        #: Offer the computed extraction macro. See `CONNECT`.
+        self.mining = bool(mining)
         self.bridge_port = bridge_port
         self.game_port = game_port
         self.speed = speed
@@ -155,8 +179,10 @@ class MindustryEnv(gym.Env):
         #: megabytes an episode before compression.
         self.capture_scene = bool(capture_scene)
 
-        #: Set by `_stamp` for the step it happened on, so a replay can show it.
+        #: Set by `_stamp` and `_connect` for the step they happened on, so a replay can
+        #: show what was laid rather than a single unexplained action.
         self._last_stamp: dict[str, Any] | None = None
+        self._last_connect: dict[str, Any] | None = None
 
         self._dir = setup_server(server_dir or f"mindustry-env-{bridge_port}")
         if jar is not None:
@@ -342,6 +368,7 @@ class MindustryEnv(gym.Env):
     @property
     def action_types(self) -> tuple[str, ...]:
         base = EMBODIED_ACTION_TYPES if self.embodied else DIRECT_ACTION_TYPES
+        base = base + (CONNECT,) if self.mining else base
         return base + (STAMP,) if self.designs else base
 
     # Conversion ------------------------------------------------------------------
@@ -363,6 +390,119 @@ class MindustryEnv(gym.Env):
         return {
             "spatial": obs["spatial"],
             "global": np.asarray(values, dtype=np.float32),
+        }
+
+    #: The most a single connect may commit to, in blocks.
+    #:
+    #: A structure the agent cannot pay for and its one unit cannot reach is not a
+    #: structure, it is a queue. Measured on the fixed design, which routed to the core
+    #: without asking either question: a quarter of its stamps committed to more than a
+    #: hundred blocks, the ninety-ninth percentile to 405, and the worst to 561, on an
+    #: agent starting with three hundred copper.
+    CONNECT_BUDGET = 60
+
+    def _connect(self, x: int, y: int) -> None:
+        """Drills on the ore under the anchor, and a belt from them to the core.
+
+        Nothing here is remembered from another map. The drills are packed onto the shape
+        of the patch that is actually there, and the belt is the shortest way round what
+        is actually in between. What the policy chose is the patch and the moment.
+        """
+        bridge = self._ensure_started()
+        raw = self._last_obs
+        core = (int(raw.get("core_x", -1)), int(raw.get("core_y", -1)))
+        if core[0] < 0 or "spatial" not in raw:
+            return
+
+        spatial = raw["spatial"]
+        channels = bridge.channels
+        ore = np.zeros(spatial.shape[1:], dtype=np.int16)
+        for index, name in enumerate(channels):
+            if name.startswith("ore_"):
+                ore[spatial[index] > 0] = index
+
+        # The anchor arrives in world coordinates and the tensor is a window, so the two
+        # have to be reconciled before anything is indexed. Reading world coordinates into
+        # a window-shaped array is not an error that raises: it lands out of range, the
+        # slice comes back empty, and every connect reports "no ore" while the map is
+        # covered in it. Measured before this line existed: 182 refusals and not one
+        # drill placed.
+        origin = raw.get("window_origin") or (0, 0)
+        ox, oy = int(origin[0]), int(origin[1])
+        rows, columns = ore.shape
+
+        half = 12
+        x0 = max(0, min(x - ox - half, columns - 1))
+        y0 = max(0, min(y - oy - half, rows - 1))
+        patch = ore[y0:min(rows, y0 + 2 * half), x0:min(columns, x0 + 2 * half)]
+
+        # Ranked by what the reward pays for each ore, so the packer and the scoring agree
+        # on what is worth mining. Without it the packer drills sand, which every darksand
+        # tile yields and which generated maps are made of: 252 of 288 tiles under the
+        # drills on a first run, against 32 of titanium worth twenty times as much.
+        worth = {index: tasks.ORE_VALUE.get(name[4:], 1.0)
+                 for index, name in enumerate(channels) if name.startswith("ore_")}
+
+        drills = mining.pack(patch, size=2, minimum=2, limit=6, worth=worth)
+        if not drills:
+            self._last_connect = {"applied": False, "type": CONNECT, "reason": "no ore"}
+            return
+
+        solid = spatial[channels.index("solid")] > 0
+        block = spatial[channels.index("block")] > 0
+        passable = ~(solid | block)
+
+        # Back to world coordinates, which is what the bridge builds in.
+        cells: list[tuple[int, int, str, int]] = []
+        for dx, dy, _, _ in drills:
+            cells.append((ox + x0 + dx, oy + y0 + dy, "mechanical-drill", 0))
+        for px, py in ((cx - ox, cy - oy) for cx, cy, _, _ in cells):
+            if 0 <= px < columns - 1 and 0 <= py < rows - 1:
+                passable[py:py + 2, px:px + 2] = False
+
+        # From the drill nearest the core, because that is the shortest line and the line
+        # is what costs.
+        head = min(cells, key=lambda cell: abs(cell[0] - core[0]) + abs(cell[1] - core[1]))
+
+        # Routed in world coordinates, on a passability map that only covers the window.
+        # Outside it nothing is known, so nothing is claimed: unknown ground is treated as
+        # open, which is what the old L-shaped routing assumed everywhere.
+        known = np.ones((int(raw.get("map_height", rows)),
+                         int(raw.get("map_width", columns))), dtype=bool)
+        known[oy:oy + rows, ox:ox + columns] = passable
+
+        steps = mining.path(known, (head[0], head[1] - 1), core)
+        if steps is None:
+            self._last_connect = {"applied": False, "type": CONNECT, "reason": "no route"}
+            return
+
+        cells += [(p.x, p.y, p.block, p.rotation) for p in mining.belt(steps)]
+        if len(cells) > self.CONNECT_BUDGET:
+            self._last_connect = {
+                "applied": False, "type": CONNECT, "reason": "too far",
+                "asked": len(cells), "budget": self.CONNECT_BUDGET,
+            }
+            return
+
+        laid = 0
+        for cx, cy, block_name, rotation in cells:
+            outcome = bridge.act({"type": "build" if self.embodied else "place",
+                                  "block": block_name, "x": cx, "y": cy,
+                                  "rotation": rotation})
+            laid += bool((outcome.get("action") or {}).get("applied"))
+
+        # What the packer believed it was doing, kept beside what was asked for. The two
+        # disagreeing is a coordinate bug, and a coordinate bug here is invisible: the
+        # drills go down, the belt goes down, and they mine nothing.
+        believed = sum(tiles for _, _, _, tiles in drills)
+
+        self._last_connect = {
+            "applied": laid > 0, "type": CONNECT, "x": x, "y": y,
+            "origin": [ox, oy], "patch": [x0, y0],
+            "believed_ore": believed,
+            "drills": len(drills), "laid": laid, "asked": len(cells),
+            "cells": [[cx, cy, block_name, rotation]
+                      for cx, cy, block_name, rotation in cells],
         }
 
     def _stamp(self, action: np.ndarray) -> None:
@@ -416,6 +556,9 @@ class MindustryEnv(gym.Env):
 
         if kind == "noop":
             return None
+        if kind == CONNECT:
+            self._connect(x, y)
+            return None
         if kind == STAMP:
             # Applied before the tick rather than as part of it: a structure is many
             # placements and the step protocol carries one.
@@ -465,6 +608,8 @@ class MindustryEnv(gym.Env):
         # produced 98 refusals out of 120 once the starting copper ran out.
         if not self.embodied:
             legal = [True, bool(block_mask.any() and free.any()), bool(owned.any())]
+            if self.mining:
+                legal.append(bool(free.any()))
             if self.designs:
                 legal.append(bool(block_mask.any() and free.any()))
             return {"type": np.array(legal, dtype=bool),
@@ -512,6 +657,12 @@ class MindustryEnv(gym.Env):
         # across 177 archived episodes and one line that ever met end to end. The
         # mechanism built for it, the designs and the forge that breeds them, has been
         # switched off the entire time while every run passed --designs.
+        # Offered when there is ore in view worth a drill and somewhere to put the belt.
+        # Cheaper to check here than to let the agent choose it and be refused: a refusal
+        # it cannot see coming teaches it nothing except that the action is bad.
+        if self.mining:
+            legal.append(bool(mineable.any() and free.any()))
+
         if self.designs:
             legal.append(bool(block_mask.any() and free.any()))
 
@@ -552,11 +703,14 @@ class MindustryEnv(gym.Env):
         bridge = self._ensure_started()
 
         self._last_stamp = None
+        self._last_connect = None
         raw = bridge.step(repeat=self.task.ticks_per_step, action=self._decode(action))
         self._steps += 1
         if self._last_stamp is not None:
             # A stamp leaves no outcome in `raw`, having been applied before the tick.
             raw = {**raw, "action": self._last_stamp}
+        elif self._last_connect is not None:
+            raw = {**raw, "action": self._last_connect}
 
         reward = self.task.reward(self._last_obs, raw)
         won = self.task.succeeded(raw)
