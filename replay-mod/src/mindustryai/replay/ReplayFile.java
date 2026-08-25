@@ -43,7 +43,75 @@ public class ReplayFile {
         public boolean breaks() {
             return "break".equals(actionType);
         }
+
+        public boolean stamps() {
+            return "stamp".equals(actionType);
+        }
+
+        /**
+         * Blocks a stamp laid, four numbers each: x, y, block name index, rotation.
+         *
+         * <p>A stamp is one action that places a whole structure, so a reader that treats
+         * it as a single placement draws almost nothing. Measured on a training archive:
+         * 5,772 stamps carrying 425,958 blocks against 5,846 placed one at a time, so 99%
+         * of everything built arrived through an action the reader did not understand.
+         */
+        public int[] cells = EMPTY;
+        public String[] cellBlocks = NO_STRINGS;
+
+        /** What moved this step. Null on a replay written before scenes were recorded. */
+        public Scene scene;
     }
+
+    /**
+     * Everything that moved during one step, exactly as the recorder saw it.
+     *
+     * <p>This is what separates a recording from a reconstruction. Replaying the agent's
+     * actions on a rebuilt world re-simulates everything else, and enemies, turret aim and
+     * items in transit all diverge from the episode being claimed. Here they are stated.
+     *
+     * <p>Every array is a flat run of fixed-width entries, which is how the bridge sends
+     * them: it costs a fraction of the equivalent objects and the widths never change.
+     */
+    public static class Scene {
+        /** id, type, team, x, y, rotation, health percent, flags, mined tile, item, amount. */
+        public static final int UNIT = 11;
+        /** tile, block, rotation, team, health percent, build progress. */
+        public static final int BUILDING = 6;
+        /** tile, health percent. Damage alone, because a base under fire changes nothing else. */
+        public static final int HURT = 2;
+        /** x, y, rotation, team. */
+        public static final int SHOT = 4;
+        /** tile, aim, recoil x, recoil y. */
+        public static final int TURRET = 4;
+
+        public static final int FLAG_MINING = 1;
+        public static final int FLAG_BUILDING = 2;
+        public static final int FLAG_SHOOTING = 4;
+
+        public int[] units = EMPTY;
+        public int[] gone = EMPTY;
+        public int[] placed = EMPTY;
+        public int[] removed = EMPTY;
+        public int[] hurt = EMPTY;
+        public int[] shots = EMPTY;
+        public int[] turrets = EMPTY;
+        /** tile, blend, scale, count, then count times (item, x, y). Variable width. */
+        public int[] belts = EMPTY;
+
+        public int agent = -1;
+
+        public int unitCount() {
+            return units.length / UNIT;
+        }
+
+        public int unit(int index, int field) {
+            return units[index * UNIT + field];
+        }
+    }
+
+    private static final int[] EMPTY = new int[0];
+    private static final String[] NO_STRINGS = new String[0];
 
     public String task = "";
     public String description = "";
@@ -208,8 +276,61 @@ public class ReplayFile {
             frame.x = integer(action, "x", 0);
             frame.y = integer(action, "y", 0);
             frame.rotation = integer(action, "r", 0);
+            readCells(action.get("cells"), frame);
         }
+
+        frame.scene = readScene(record.get("scene"));
         return frame;
+    }
+
+    /** A stamp's blocks, whose block name is a string and whose rest is numbers. */
+    private static void readCells(Jval cells, Frame frame) {
+        if (cells == null || !cells.isArray()) {
+            return;
+        }
+        int count = cells.asArray().size;
+        frame.cells = new int[count * 3];
+        frame.cellBlocks = new String[count];
+        for (int i = 0; i < count; i++) {
+            Jval cell = cells.asArray().get(i);
+            if (!cell.isArray() || cell.asArray().size < 4) {
+                continue;
+            }
+            frame.cells[i * 3] = cell.asArray().get(0).asInt();
+            frame.cells[i * 3 + 1] = cell.asArray().get(1).asInt();
+            frame.cells[i * 3 + 2] = cell.asArray().get(3).asInt();
+            frame.cellBlocks[i] = cell.asArray().get(2).asString();
+        }
+    }
+
+    private static Scene readScene(Jval scene) {
+        if (scene == null || !scene.isObject()) {
+            return null;
+        }
+        Scene out = new Scene();
+        out.agent = integer(scene, "agent", -1);
+        out.units = numbers(scene.get("units"));
+        out.gone = numbers(scene.get("gone"));
+        out.placed = numbers(scene.get("placed"));
+        out.removed = numbers(scene.get("removed"));
+        out.hurt = numbers(scene.get("hurt"));
+        out.shots = numbers(scene.get("shots"));
+        out.turrets = numbers(scene.get("turrets"));
+        out.belts = numbers(scene.get("belts"));
+        return out;
+    }
+
+    /** A flat JSON array of numbers, rounded to int. Positions are already in tiles. */
+    private static int[] numbers(Jval array) {
+        if (array == null || !array.isArray()) {
+            return EMPTY;
+        }
+        int size = array.asArray().size;
+        int[] values = new int[size];
+        for (int i = 0; i < size; i++) {
+            values[i] = Math.round(array.asArray().get(i).asFloat());
+        }
+        return values;
     }
 
     private static String string(Jval object, String key, String fallback) {

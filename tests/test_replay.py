@@ -160,3 +160,22 @@ def test_the_scene_is_recorded(recorded: Path) -> None:
     assert keys & {"units", "belts", "turrets", "shots", "placed"}, (
         f"the scene carries nothing that moved: {sorted(keys)}"
     )
+
+
+def test_the_scene_survives_a_wrapper(env, tmp_path) -> None:
+    """Recording through a wrapper must still record the world.
+
+    Turning the scene on is an attribute assignment, and a wrapper delegates attribute
+    *reads* through `__getattr__` while assignments land on the wrapper itself, where
+    nothing looks. Training always wraps the environment in a `LocalWindow`, so the flag
+    was set on the wrapper and read from the environment, and every frame of a 974 step
+    recording came out with no scene at all. It looked exactly like a correct file.
+    """
+    from gamma.replay import ReplayRecorder
+    from gamma.window import LocalWindow
+
+    env.capture_scene = False
+    wrapped = LocalWindow(env, size=16, channels=env._bridge.channels.__len__())
+    ReplayRecorder(wrapped, tmp_path / "wrapped.jsonl.gz")
+
+    assert env.capture_scene, "the flag stopped at the wrapper, where nothing reads it"

@@ -58,7 +58,16 @@ class ReplayRecorder:
         self._file: gzip.GzipFile | None = None
         # Recording is the only reason to pay for the scene, so the recorder turns it on
         # rather than every caller having to remember to.
-        env.capture_scene = True
+        #
+        # Down to the real environment, not to whatever wraps it. A wrapper delegates
+        # attribute *reads* through `__getattr__`, so `hasattr` says yes and an assignment
+        # still lands on the wrapper, where nothing reads it. Recording through a
+        # `LocalWindow` therefore produced a file with the scene silently missing from
+        # every one of its 974 frames, and it looked exactly like a correct recording.
+        target = env
+        while getattr(target, "env", None) is not None:
+            target = target.env
+        target.capture_scene = True
         self._previous_raw: dict[str, Any] | None = None
         self._step = 0
 

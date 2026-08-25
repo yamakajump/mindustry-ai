@@ -38,6 +38,10 @@ public class ReplayController {
     public static final int TICKS_PER_STEP = 30;
 
     private ReplayFile replay;
+
+    /** The recorded world, which is authoritative over anything the game would decide. */
+    private final ReplayScene scene = new ReplayScene();
+
     private int cursor;
     private float speed = 1f;
     private float tickBudget;
@@ -79,6 +83,7 @@ public class ReplayController {
     // Loading ---------------------------------------------------------------------
 
     public void load(ReplayFile file) {
+        scene.clear();
         this.replay = file;
         this.cursor = 0;
         this.tickBudget = 0f;
@@ -170,6 +175,18 @@ public class ReplayController {
                 return;
             }
             cursor = from;
+
+            // The scene is a delta, so a unit that has not moved since before the snapshot
+            // is in no step after it and would never be recreated. Replaying the unit
+            // stream from the start is the only reading that cannot lose one, and it costs
+            // nothing: it is a few positions per step and nothing is drawn.
+            scene.clear();
+            for (int i = 0; i < cursor; i++) {
+                ReplayFile.Frame earlier = replay.frames.get(i);
+                if (earlier.scene != null) {
+                    scene.apply(earlier.scene);
+                }
+            }
         }
 
         seeking = true;
@@ -257,6 +274,12 @@ public class ReplayController {
         // Time.delta already carries the speed multiplier, so actions land at the same
         // point in game time whatever the playback rate.
         tickBudget += Time.delta;
+
+        // Recorded steps are half a second apart, so snapping to each one turns a flight
+        // into a slideshow. Sliding between them is exact at every recorded instant and
+        // honest in between: the unit was somewhere on that line.
+        scene.interpolate(tickBudget / TICKS_PER_STEP);
+
         while (tickBudget >= TICKS_PER_STEP && cursor < replay.frames.size) {
             tickBudget -= TICKS_PER_STEP;
             applyFrame(replay.frames.get(cursor));
@@ -266,27 +289,51 @@ public class ReplayController {
         }
     }
 
+    /**
+     * One recorded step.
+     *
+     * <p>The scene comes first and settles almost everything: which buildings stand, where
+     * every unit is, how hurt each of them is. The actions are applied afterwards and only
+     * for what the scene cannot express, which is a replay written before scenes existed.
+     * Applying both is not redundant: the scene reports the world as the recorder saw it
+     * at the END of the step, while an action taken during that step may not have finished
+     * yet, and a building still under construction is in neither.
+     */
     private void applyFrame(ReplayFile.Frame frame) {
+        if (frame.scene != null) {
+            scene.apply(frame.scene);
+            return;
+        }
+
+        // Replays written before the scene existed. Actions only, which is what the reader
+        // did for every replay until now, and what it could never do faithfully.
         if (frame.places()) {
-            place(frame);
+            place(frame.block, frame.x, frame.y, frame.rotation);
         } else if (frame.breaks()) {
             Tile tile = Vars.world.tile(frame.x, frame.y);
             if (tile != null && tile.build != null) {
                 tile.setBlock(Blocks.air);
             }
+        } else if (frame.stamps()) {
+            // Thirty-eight blocks reported as one action, and the reason the old reader
+            // showed 1% of what was built.
+            for (int i = 0; i < frame.cellBlocks.length; i++) {
+                place(frame.cellBlocks[i], frame.cells[i * 3], frame.cells[i * 3 + 1],
+                    frame.cells[i * 3 + 2]);
+            }
         }
     }
 
-    private void place(ReplayFile.Frame frame) {
-        Block block = Vars.content.block(frame.block);
-        Tile tile = Vars.world.tile(frame.x, frame.y);
+    private void place(String name, int x, int y, int rotation) {
+        Block block = Vars.content.block(name);
+        Tile tile = Vars.world.tile(x, y);
         if (block == null || tile == null) {
             return;
         }
         // Recorded actions were already validated when they were played, so they are
         // applied directly. Re-validating here would reject placements that were legal at
         // the time and make the replay diverge from what actually happened.
-        tile.setBlock(block, Vars.state.rules.defaultTeam, frame.rotation);
+        tile.setBlock(block, Vars.state.rules.defaultTeam, rotation);
     }
 
     private void changed() {

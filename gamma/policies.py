@@ -43,6 +43,17 @@ class MaskedRandomPolicy:
         mask = info.get("action_mask", {})
         action = np.zeros(5, dtype=np.int64)
 
+        # Checked rather than assumed. The action list grows a `stamp` entry when designs
+        # are loaded, and a caller that built this policy without an environment gets a
+        # shorter list and indexes off the end, or worse, indexes into the wrong action.
+        # The same mismatch, in the mask, hid the stamp from the network for a whole day.
+        declared = mask.get("type")
+        if declared is not None and len(declared) != len(self.types):
+            raise ValueError(
+                f"the environment offers {len(declared)} action types and this policy "
+                f"knows {len(self.types)}: {self.types}. Build it with env=."
+            )
+
         legal_types = np.flatnonzero(mask.get("type", np.ones(len(self.types), bool)))
         kind = int(self.rng.choice(legal_types)) if legal_types.size else 0
         action[0] = kind
