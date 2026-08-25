@@ -115,3 +115,31 @@ def test_no_task_pays_for_standing_still():
             f"{name} pays {task.reward(still, still)} for a step in which nothing changed, "
             "which an agent collects every step of the episode for free"
         )
+
+
+def test_each_caller_gets_its_own_ledger():
+    """A stateful reward must not be shared between environments.
+
+    The curriculum is a module-level dictionary, so `get` used to hand every caller the
+    same `Task` and therefore the same reward object. Harmless while a reward was a pure
+    function; not harmless once it kept a per-episode ledger, because a training run puts
+    twenty-four environments on twenty-four threads of one process.
+
+    It surfaced as nonsense in the accounts rather than as a crash. Across 225 archived
+    episodes the breakdown reported 1,515 core losses, up to nine in one episode, some on
+    steps whose reward was exactly zero: one environment's itemisation read while another
+    environment's step had overwritten it.
+    """
+    one, other = tasks.get("frontier"), tasks.get("frontier")
+    assert one.reward is not other.reward
+
+    still = {
+        "wave": 1, "has_core": True, "core_health": 4000.0, "items": {}, "produced": {},
+        "crafting": 0.0, "placed": {}, "stats": {}, "unit": {"carrying": 0},
+    }
+    one.reward(still, {**still, "produced": {"copper": 40}})
+
+    assert one.reward.credited == pytest.approx(40.0)
+    assert other.reward.credited == pytest.approx(0.0), (
+        "a delivery credited in one environment was visible in another"
+    )

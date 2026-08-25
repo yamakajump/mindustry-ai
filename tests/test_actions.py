@@ -94,7 +94,11 @@ def building(bridge_server, bridge_ports):
     and told us nothing: a test that fails because the map killed it is measuring the map.
     """
     with Bridge(port=bridge_ports[0], tensor=True) as client:
-        obs = client.reset("Ancient_Caldera", "sandbox")
+        # Seeded, because Mindustry repaints ore at load time and this test needs a
+        # copper tile whose two-by-two footprint a drill will accept near the core. On
+        # unseeded worlds it failed roughly one run in three with "no copper tile took a
+        # drill", which reads exactly like a broken placement path and is not one.
+        obs = client.reset("Ancient_Caldera", "sandbox", seed=20260825)
         yield client, obs
 
 

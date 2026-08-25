@@ -14,7 +14,7 @@ function.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable
 
 Observation = dict[str, Any]
@@ -671,9 +671,28 @@ CURRICULUM: dict[str, Task] = {
 
 
 def get(name: str) -> Task:
+    """The task by name, with a reward of its own if the reward keeps state.
+
+    The curriculum is a module-level dictionary, so every caller used to get the same
+    `Task` object and therefore the same reward object. That was harmless while a reward
+    was a pure function of two observations, and stopped being harmless the moment one
+    started keeping a per-episode ledger: a training run puts twenty-four environments on
+    twenty-four threads of one process, and all twenty-four were writing into one ledger.
+
+    It showed up as nonsense in the accounts rather than as a crash, which is the worse
+    outcome. Across 225 archived episodes the breakdown reported 1,515 core losses, up to
+    nine in a single episode, several of them on steps whose reward was exactly zero:
+    one environment's itemised total being read while another environment's step had
+    overwritten it. The ledger was equally shared, so delivery credited anywhere counted
+    everywhere and the milestones fired for whoever asked first.
+    """
     if name not in CURRICULUM:
         raise KeyError(f"unknown task {name!r}, known: {sorted(CURRICULUM)}")
-    return CURRICULUM[name]
+
+    task = CURRICULUM[name]
+    if hasattr(task.reward, "reset"):
+        return replace(task, reward=type(task.reward)())
+    return task
 
 
 def _survive_and_defend() -> Callable[[Observation, Observation], float]:
