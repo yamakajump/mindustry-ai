@@ -73,3 +73,4 @@ mindustry-beta/
 # fichiers regeneres en vingt secondes : un depot n'est pas l'endroit pour ca.
 viewer/assets/sprites/
 viewer/assets/index.json
+archive/
