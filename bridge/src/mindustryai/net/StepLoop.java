@@ -985,7 +985,14 @@ public class StepLoop implements ApplicationListener {
                 // Accumulates only while the crafter is warm and actually producing, so
                 // its change between two steps is work rather than ownership.
                 if (build instanceof mindustry.world.blocks.production.GenericCrafter.GenericCrafterBuild crafter) {
-                    crafting += crafter.totalProgress;
+                    // Divided by the recipe's own duration, so the figure counts *crafts*
+                    // rather than ticks spent crafting. Raw, it is about one per tick: a
+                    // single press running a whole episode would accumulate ninety
+                    // thousand, and any weight that made one craft matter would have made
+                    // that term worth more than the rest of the reward put together.
+                    float period = Math.max(1f,
+                        ((mindustry.world.blocks.production.GenericCrafter) crafter.block).craftTime);
+                    crafting += crafter.totalProgress / period;
                 }
                 // Instantaneous rather than cumulative: it says a generator is burning
                 // something right now, which is what a fuel line existing means.
