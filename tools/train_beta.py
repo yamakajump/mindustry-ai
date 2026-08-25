@@ -771,6 +771,7 @@ def main() -> None:
             # that has learnt exactly what to build and nothing about where reads as flat.
             f"H[t {stats['entropy_type']:.2f} b {stats['entropy_block']:.2f} "
             f"p {stats['entropy_position']:.2f} r {stats['entropy_rotation']:.2f}]  "
+            f"grad[p {stats['grad_policy']:.3f} H {stats['grad_entropy']:.3f}]  "
             f"scale {stats['reward_scale']:.2f}  "
             f"episodes {snapshot['episodes']}  solved {snapshot['solved']}",
             flush=True,
