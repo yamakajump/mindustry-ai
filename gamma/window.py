@@ -68,6 +68,14 @@ class LocalWindow:
         return int(raw.get("core_x", 0)), int(raw.get("core_y", 0))
 
     def _update_origin(self, raw: dict[str, Any]) -> None:
+        # Told rather than derived, whenever the bridge cropped for us. Two
+        # implementations of the same clamp is how a tensor comes to show one part of the
+        # world while the actions are read against another, silently.
+        given = raw.get("window_origin")
+        if given is not None:
+            self._origin = (int(given[0]), int(given[1]))
+            return
+
         centre_x, centre_y = self._centre(raw)
         width = int(raw.get("map_width", self.size))
         height = int(raw.get("map_height", self.size))
@@ -80,8 +88,12 @@ class LocalWindow:
         )
 
     def _crop(self, observation: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
-        x0, y0 = self._origin
-        spatial = observation["spatial"][:, y0:y0 + self.size, x0:x0 + self.size]
+        spatial = observation["spatial"]
+        # Already the right size means the bridge cropped it, and cropping again would
+        # take a window of a window and land somewhere nobody asked for.
+        if spatial.shape[1:] != (self.size, self.size):
+            x0, y0 = self._origin
+            spatial = spatial[:, y0:y0 + self.size, x0:x0 + self.size]
 
         if spatial.shape[1:] != (self.size, self.size):
             padded = np.zeros((spatial.shape[0], self.size, self.size), dtype=np.uint8)
@@ -103,6 +115,8 @@ class LocalWindow:
         return {"spatial": np.ascontiguousarray(spatial), "global": observation["global"]}
 
     def _crop_mask(self, mask: np.ndarray) -> np.ndarray:
+        if mask.shape == (self.size, self.size):
+            return mask
         x0, y0 = self._origin
         window = mask[y0:y0 + self.size, x0:x0 + self.size]
         if window.shape != (self.size, self.size):

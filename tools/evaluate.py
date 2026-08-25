@@ -200,6 +200,7 @@ def main() -> None:
         MindustryEnv(
             task, server_dir=args.root, bridge_port=args.port, game_port=args.port - 1000,
             jar=jar, embodied=True, speed="max", evaluating=True, designs=designs,
+            window=args.window,
         ),
         size=args.window, channels=args.channels,
     )

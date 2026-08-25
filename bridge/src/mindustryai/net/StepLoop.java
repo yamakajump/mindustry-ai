@@ -54,6 +54,17 @@ public class StepLoop implements ApplicationListener {
     private boolean sendTensor;
 
     /**
+     * Side of the square sent around the agent, or zero for the whole map.
+     *
+     * <p>The policy reads a window and discards the rest, so sending the map moves eighty
+     * times more than anybody looks at: 2.6 MB against 32 KB, on every step of every
+     * environment. Measured on an idle machine, the tensor is 6.5 ms of a 7.2 ms step,
+     * and with two dozen environments decoding one each behind a single interpreter lock
+     * it was most of the ninety-two milliseconds a step actually took.
+     */
+    private int window;
+
+    /**
      * Frames a step may span before it is abandoned.
      *
      * <p>A step only completes when the world actually runs, so anything that stops it
@@ -169,6 +180,9 @@ public class StepLoop implements ApplicationListener {
     private void handleHello(Jval message) {
         if (message.get("tensor") != null) {
             sendTensor = message.get("tensor").asBool();
+        }
+        if (message.get("window") != null) {
+            window = Math.max(0, message.get("window").asInt());
         }
         Jval reply = Jval.newObject();
         reply.put("ok", true);
@@ -1080,6 +1094,32 @@ public class StepLoop implements ApplicationListener {
     }
 
     /**
+     * Where the window sits, clamped so it never runs off the map.
+     *
+     * <p>Centred on the agent when it has a body, on the base otherwise, which is what
+     * the agent can actually see from where it stands.
+     */
+    private int[] windowOrigin(int side) {
+        int half = side / 2;
+
+        int cx;
+        int cy;
+        if (body != null && body.unit() != null) {
+            cx = (int) (body.unit().x / Vars.tilesize);
+            cy = (int) (body.unit().y / Vars.tilesize);
+        } else {
+            var core = Vars.state.rules == null ? null : Vars.state.rules.defaultTeam.core();
+            cx = core == null ? Vars.world.width() / 2 : core.tileX();
+            cy = core == null ? Vars.world.height() / 2 : core.tileY();
+        }
+
+        return new int[]{
+            Math.max(0, Math.min(cx - half, Vars.world.width() - side)),
+            Math.max(0, Math.min(cy - half, Vars.world.height() - side)),
+        };
+    }
+
+    /**
      * Send an observation, with the spatial tensor attached when the agent asked for it.
      *
      * <p>The JSON frame always carries the tensor's shape and dtype, so the client knows
@@ -1091,12 +1131,27 @@ public class StepLoop implements ApplicationListener {
             return;
         }
 
-        byte[] tensor = encoder.encode();
+        int side = window > 0 ? Math.min(window, Math.min(Vars.world.width(), Vars.world.height()))
+            : 0;
+        int[] origin = side > 0 ? windowOrigin(side) : new int[]{0, 0};
+        int sentWidth = side > 0 ? side : encoder.width();
+        int sentHeight = side > 0 ? side : encoder.height();
+
+        byte[] tensor = encoder.encode(origin[0], origin[1], sentWidth, sentHeight);
+
+        // Sent with every tensor, because the caller must not derive it. Two
+        // implementations of the same clamp is exactly how a tensor comes to show one
+        // part of the world while the actions are read against another, silently, with
+        // nothing visible from outside but an agent that never learns.
+        Jval where = Jval.newArray();
+        where.asArray().add(Jval.valueOf(origin[0]));
+        where.asArray().add(Jval.valueOf(origin[1]));
+        obs.put("window_origin", where);
 
         Jval shape = Jval.newArray();
         shape.asArray().add(Jval.valueOf(encoder.channels().length));
-        shape.asArray().add(Jval.valueOf(encoder.height()));
-        shape.asArray().add(Jval.valueOf(encoder.width()));
+        shape.asArray().add(Jval.valueOf(sentHeight));
+        shape.asArray().add(Jval.valueOf(sentWidth));
 
         // Channel names travel with every tensor, not just with the handshake. Ore
         // channels only exist once a map is loaded, so a list captured at hello time

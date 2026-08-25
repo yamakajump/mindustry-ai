@@ -38,6 +38,7 @@ class Bridge:
         port: int = 7654,
         timeout: float = 60.0,
         tensor: bool = False,
+        window: int = 0,
     ) -> None:
         self.host = host
         self.port = port
@@ -45,6 +46,8 @@ class Bridge:
         # Spatial tensors are large, so they are opt-in and negotiated at handshake.
         self.tensor = tensor
         self.channels: list[str] = []
+        #: Side of the square the bridge should send, or zero for the whole map.
+        self.window = int(window)
         self._sock: socket.socket | None = None
 
     # Connection ----------------------------------------------------------------
@@ -68,7 +71,13 @@ class Bridge:
         else:
             raise ConnectionError(f"no bridge on {self.host}:{self.port}") from last
 
-        hello = self.request({"cmd": "hello", "tensor": self.tensor})
+        message = {"cmd": "hello", "tensor": self.tensor}
+        if self.window:
+            # Ask the bridge to send the window rather than the map. The policy reads a
+            # window and throws the rest away, so without this every step moves eighty
+            # times more than anybody looks at: 2.6 MB against 32 KB.
+            message["window"] = int(self.window)
+        hello = self.request(message)
         self.channels = hello.get("channels", [])
         if hello.get("protocol") != PROTOCOL_VERSION:
             raise BridgeError(

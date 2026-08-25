@@ -177,6 +177,7 @@ class EnvWorker:
             embodied=self.args.embodied,
             speed=str(self.args.watch_speed) if watched else "max",
             designs=designs,
+            window=self.args.window,
         )
 
         # Every match records, not just the one being watched.
