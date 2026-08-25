@@ -512,6 +512,12 @@ class MindustryEnv(gym.Env):
         lost = self.task.failed(raw)
         if won:
             reward += self.task.success_bonus
+            # Folded into the itemisation too, or the accounts stop adding up exactly
+            # where the run finally went well. Seven steps in one archive paid 51 while
+            # their breakdown showed 1, which reads as a leak and is a bonus.
+            terms = getattr(self.task.reward, "last_terms", None)
+            if terms is not None:
+                terms["won"] = terms.get("won", 0.0) + self.task.success_bonus
 
         self._last_obs = raw
         truncated = self._steps >= self.task.max_steps and not (won or lost)
