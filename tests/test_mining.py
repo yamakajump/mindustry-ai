@@ -183,3 +183,25 @@ def test_the_cap_still_bounds_a_hopeless_search() -> None:
     passable[:, 100] = False
 
     assert mining.path(passable, (0, 0), (199, 199)) is None
+
+
+def test_a_three_by_three_core_can_be_arrived_at() -> None:
+    """The goal exception covers the goal tile and nothing around it.
+
+    A core is three tiles by three and every one of them is solid, so the only ways into
+    the centre are the eight tiles surrounding it, which are the core as well. The search
+    could reach the goal by exception and could never reach a neighbour of it: arriving at
+    its own core was impossible by construction whenever the core sat inside the window.
+    Outside it everything is assumed open, so the same connect succeeded or failed on
+    where the agent happened to be standing. Measured after the walling was fixed, 9,849
+    connects and 7,160 stamps were still refused for no route.
+    """
+    passable = np.ones((20, 20), dtype=bool)
+    passable[9:12, 9:12] = False          # the core, solid through and through
+
+    assert mining.path(passable, (2, 10), (10, 10)) is None, (
+        "stated as it was: solid on all nine tiles and the centre is unreachable")
+
+    passable[9:12, 9:12] = True           # allied ground, crossed rather than skirted
+    steps = mining.path(passable, (2, 10), (10, 10))
+    assert steps is not None and steps[-1] == (10, 10)

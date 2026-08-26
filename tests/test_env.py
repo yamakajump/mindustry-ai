@@ -109,8 +109,16 @@ def test_alpha_beats_random_on_t1(env: MindustryEnv) -> None:
         env.task = tasks.T1_COPPER
 
     assert scripted["reward"] > chaotic["reward"]
-    assert scripted["applied"] > chaotic["applied"]
     assert scripted["items"].get("copper", 0) > chaotic["items"].get("copper", 0)
+
+    # On the share that lands, not on the count. A random policy that picks `connect`
+    # spends one action on forty blocks, so once routing stopped refusing it the noise
+    # out-counted the script while still scoring and mining far less. What this was
+    # protecting is that Alpha's actions land, which is a rate.
+    def landing(result):
+        return result["applied"] / max(1, result["applied"] + result["refused"])
+
+    assert landing(scripted) > landing(chaotic)
 
 
 def test_a_loaded_design_is_reachable(env: MindustryEnv) -> None:

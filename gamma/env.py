@@ -636,8 +636,16 @@ class MindustryEnv(gym.Env):
             origin = raw.get("window_origin") or (0, 0)
             ox, oy = int(origin[0]), int(origin[1])
             rows, columns = block.shape
-            passable[oy:oy + rows, ox:ox + columns] = ~(solid | (block & ~mine))
-            ours[oy:oy + rows, ox:ox + columns] = block & mine
+            # Allied ground is crossed whatever it is, and the core is the reason it has to
+            # be. A core is three tiles by three and every one of them is solid, so the
+            # only ways into the centre are the eight tiles around it, which are the core
+            # as well. The search could reach the goal tile by exception and could never
+            # reach a neighbour of it, which made arriving at its own core impossible by
+            # construction the moment the core was inside the window. Outside the window
+            # everything is assumed open, so the same connect succeeded or failed on where
+            # the agent happened to be standing.
+            passable[oy:oy + rows, ox:ox + columns] = ~((solid | block) & ~mine)
+            ours[oy:oy + rows, ox:ox + columns] = (block | solid) & mine
 
         return passable, ours
 
