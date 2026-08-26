@@ -257,6 +257,97 @@ def describe_archive(episodes) -> str:
     )
 
 
+def check_self_churn(episodes) -> bool:
+    """Does the agent tear down its own fresh work, and is that priced?
+
+    The symptom that was visible on screen for days while every number said nothing:
+    demolition markers all over its own drills and belts. The penalty that was supposed to
+    price it had been watching only manual placements, and the agent had stopped placing
+    by hand, so the counter sat at zero while the behaviour ran.
+
+    So this counts the behaviour from the recording rather than from the penalty, and then
+    checks that the penalty saw it too. A gap between the two is the failure mode: a rule
+    that watches the wrong door is indistinguishable from no rule.
+    """
+    self_break = charged = 0
+    for _, frames in episodes:
+        state: dict[tuple[int, int], str] = {}
+        for frame in frames:
+            charged += 1 if (frame.get("terms") or {}).get("churn") else 0
+            act = frame.get("act") or {}
+            if frame.get("refused"):
+                continue
+            kind = act.get("t", "")
+            cells = act.get("cells") or ([[act["x"], act["y"]]] if "x" in act else [])
+            for cell in cells:
+                key = (int(cell[0]), int(cell[1]))
+                if kind == "break":
+                    self_break += state.get(key) == "built"
+                    state[key] = "torn"
+                elif kind in ("place", "connect", "stamp"):
+                    state[key] = "built"
+
+    seen = self_break / max(1, len(episodes))
+    detail = (f"{self_break:,} demolitions sur ses propres blocs "
+              f"({seen:.1f} par episode), {charged:,} facturees")
+    if self_break and not charged:
+        return report("gachis facture", False,
+                      detail + "\n  le malus ne voit pas ce qui se passe a l'ecran")
+    return report("gachis facture", True, detail)
+
+
+def check_actions_land(episodes) -> bool:
+    """How much of the episode is spent on actions the world refuses.
+
+    A refused action costs a step and changes nothing, so a high rate is the agent paying
+    full price for an empty turn. It is also a masking failure: the masks exist so that an
+    action offered is an action that can be taken.
+    """
+    counts = Counter()
+    refused = total = 0
+    for _, frames in episodes:
+        for frame in frames:
+            act = frame.get("act")
+            if not act:
+                continue
+            total += 1
+            if frame.get("refused"):
+                refused += 1
+                counts[act.get("t", "?")] += 1
+
+    if not total:
+        return report("les actions aboutissent", True, "aucune action enregistree")
+
+    rate = refused / total
+    worst = ", ".join(f"{k} {v:,}" for k, v in counts.most_common(3))
+    detail = f"{rate:.1%} refusees ({refused:,}/{total:,})" + (f"   surtout {worst}" if worst else "")
+    return report("les actions aboutissent", rate < 0.25, detail)
+
+
+def check_builds_more_than_it_breaks(episodes) -> bool:
+    """An agent that demolishes more than it builds is not building a base.
+
+    Counted in blocks rather than in decisions, because one `connect` lays forty and one
+    `break` removes one: comparing decisions made a run that was tearing down four blocks
+    for every one it laid look balanced.
+    """
+    laid = torn = 0
+    for _, frames in episodes:
+        for frame in frames:
+            if frame.get("refused"):
+                continue
+            act = frame.get("act") or {}
+            kind = act.get("t", "")
+            if kind == "break":
+                torn += 1
+            elif kind in ("place", "connect", "stamp"):
+                laid += len(act.get("cells") or [1])
+
+    ratio = torn / max(1, laid)
+    return report("il construit plus qu'il ne casse", ratio < 0.5,
+                  f"{laid:,} blocs poses contre {torn:,} casses  (rapport {ratio:.2f})")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path("replays/live"))
@@ -277,6 +368,9 @@ def main() -> None:
         check_core_losses(episodes),
         check_annuity(episodes),
         check_terms_add_up(episodes),
+        check_self_churn(episodes),
+        check_actions_land(episodes),
+        check_builds_more_than_it_breaks(episodes),
     ])
 
     print("\nprogression reelle, mesuree sur le run :")
