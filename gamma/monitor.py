@@ -317,6 +317,8 @@ class TrainingMonitor:
         self.title = title
         self.started = time.time()
         self._matches: dict[int, MatchState] = {}
+        #: Set to stop whichever replay is currently being watched.
+        self._replay_stop: threading.Event | None = None
         self._lock = threading.Lock()
 
         #: Set while the run should keep going. Cleared to hold it between updates.
@@ -454,6 +456,45 @@ class TrainingMonitor:
             return None
         return round(sum(rewards) / len(rewards), 3)
 
+    #: Where a replay being watched appears, high enough to sort after every real match.
+    REPLAY_SLOT = 9000
+
+    def open_replay(self, index: int, name: str, speed: float = 4.0) -> bool:
+        """Play an archived episode into the dashboard, in place of any other being watched.
+
+        One slot rather than one per file: watching a second replay means you are done with
+        the first, and a page slowly filling with abandoned playbacks is its own bug.
+        """
+        from gamma import playback
+
+        path = self.replay_path(index, name)
+        if path is None:
+            return False
+
+        header, frames = playback.read(Path(path))
+        if not frames:
+            return False
+
+        with self._lock:
+            previous = self._replay_stop
+        if previous is not None:
+            previous.set()
+
+        stopping = threading.Event()
+        state = self.match(self.REPLAY_SLOT)
+        state.scene.clear()
+        playback.describe(state, header, frames, name)
+
+        with self._lock:
+            self._replay_stop = stopping
+
+        threading.Thread(
+            target=playback.play,
+            args=(self, state, header, frames, speed, stopping),
+            daemon=True,
+        ).start()
+        return True
+
     def register_replays(self, index: int, archive: Any) -> None:
         with self._lock:
             self._archives[index] = archive
@@ -554,6 +595,19 @@ class TrainingMonitor:
                         self.send_error(404)
                         return
                     self._json(terrain)
+                    return
+
+                if self.path.startswith("/watch/"):
+                    # Play an archived episode into the dashboard rather than hand the file
+                    # to a second viewer that draws it its own way.
+                    parts = self.path[len("/watch/"):].partition("?")[0].split("/")
+                    if len(parts) != 2 or not parts[0].isdigit():
+                        self.send_error(400)
+                        return
+                    if not monitor.open_replay(int(parts[0]), parts[1]):
+                        self.send_error(404)
+                        return
+                    self._json({"ok": True, "match": monitor.REPLAY_SLOT})
                     return
 
                 if self.path.startswith("/replay/"):

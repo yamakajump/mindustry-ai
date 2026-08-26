@@ -264,22 +264,53 @@ class EnvWorker:
             # environment it came from. The next one resynchronises anyway.
             pass
 
-    def _capture_terrain(self, env, state) -> None:
+    def _capture_terrain(self, env, state, expected: tuple[int, int] | None = None) -> None:
         """Fetch the typed map once per episode so the dashboard can draw the real thing.
 
         Costs one extra request per episode, against tens of kilobytes that would
         otherwise have to ride along with every half-second poll.
+
+        Checked against the size the observation reports, and refetched while they differ.
+        A sector does not finish loading the instant the command returns, so the map asked
+        for right after a reset can still be the previous one. Nothing raises: the terrain
+        endpoint then serves one map while the scene describes another, entities are placed
+        by tile index against the wrong width, and the viewer draws bare ground with no
+        agent, no buildings and no enemies on it for the whole episode. Measured on a live
+        run before this check existed: seven matches out of eight disagreeing, and one of
+        them still at 430 against 300 five hundred steps into the same episode.
         """
+        for attempt in range(6):
+            typed = self._fetch_map(env)
+            if typed is None:
+                return
+            if expected is None or (typed["width"], typed["height"]) == expected:
+                break
+            time.sleep(0.25)
+        else:
+            print(f"env {self.index}: the map never settled at {expected}, "
+                  f"the view will show the wrong world", flush=True)
+
+        self._store_terrain(typed, state)
+
+    @staticmethod
+    def _map_size(info) -> tuple[int, int] | None:
+        """The size the observation says the world is, which is the one that matters."""
+        raw = (info or {}).get("raw") or {}
+        width, height = int(raw.get("map_width", 0)), int(raw.get("map_height", 0))
+        return (width, height) if width and height else None
+
+    def _fetch_map(self, env):
         try:
-            typed = env._bridge.map()
+            return env._bridge.map()
         except Exception as error:
             # Swallowed, this leaves the viewer holding the map of an earlier episode while
             # the scene describes the current one, and it draws the agent and everything it
             # built outside a world that is not the one it is in.
             print(f"env {self.index}: could not fetch the map, the view will lag: {error!r}",
                   flush=True)
-            return
+            return None
 
+    def _store_terrain(self, typed, state) -> None:
         planes = typed["spatial"]
         tiles = typed["width"] * typed["height"]
         state.terrain = {
@@ -309,7 +340,7 @@ class EnvWorker:
             state.watchable = self.showcase
 
             observation, info = env.reset()
-            self._capture_terrain(env, state)
+            self._capture_terrain(env, state, self._map_size(info))
             self._capture_scene(env, state, force=True)
             episode_reward = 0.0
             episode_steps = 0
@@ -368,7 +399,7 @@ class EnvWorker:
                     self._archive_episode(state, episode_reward, solved)
                     observation, info = env.reset()
                     state.scene.clear()
-                    self._capture_terrain(env, state)
+                    self._capture_terrain(env, state, self._map_size(info))
                     self._capture_scene(env, state, force=True)
                     episode_reward = 0.0
                     episode_steps = 0

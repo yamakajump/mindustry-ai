@@ -519,6 +519,9 @@ async function loadTerrain(index, version) {
       // keying the caches on that number threw away the darkness, the bounds and every
       // painted layer for a map that had not changed a tile.
       fetched: version, version, width: data.width, height: data.height, palette: data.palette,
+      // The no-build ring around each spawn, which the drawing needs and which was being
+      // dropped here: the field arrived from the bridge and stopped at this decode.
+      drop_zone_radius: data.drop_zone_radius || 0,
       floor: new Uint16Array(floor.buffer, floor.byteOffset, tiles),
       overlay: new Uint16Array(overlay.buffer, overlay.byteOffset, tiles),
       block: new Uint16Array(block.buffer, block.byteOffset, tiles),
@@ -725,6 +728,17 @@ async function pollScene(index) {
     const world = worldOf(index);
     const data = await (await fetch(`scene/${index}?since=${world.version}`, { cache: "no-store" })).json();
     if (data.version !== world.version || data.full) world.apply(data, performance.now());
+
+    // A new episode loads a new map, and the terrain and the scene do not arrive together.
+    // While they disagree nothing at all is drawn on top of the ground, because entities
+    // are addressed by tile index and that only decodes against the right width. Waiting
+    // for the terrain version to change means waiting a whole poll cycle, and on short
+    // episodes the view spends most of its life blank: no agent, no buildings, no enemies.
+    // Noticing the disagreement here and dropping the stale map closes it on the next poll.
+    const terrain = terrains.get(index);
+    if (terrain && world.width && world.width !== terrain.width) {
+      terrain.fetched = null;
+    }
   } catch {
     // Silent: a missed frame is a stutter, and the next poll resynchronises.
   } finally {
@@ -1460,15 +1474,23 @@ function drawMatch(canvas, match, terrain, world, zoom, now) {
   drawDropZones(ctx, terrain, { cell, sx, sy });
 
   const tick = lerp(world.fromTick, world.tick, alpha);
-  // Entities are addressed by tile index, which only decodes against the width of the map
-  // they are on. Between two episodes the scene can carry the new world while the terrain
-  // is still the old one, and drawing them together puts the agent and everything it built
-  // in the middle of a map it is not in. Better to draw the ground alone for a frame.
-  if (world.width && world.width !== terrain.width) return;
+
+  // Buildings and belt items are addressed by tile index, which only decodes against the
+  // width of the map they are on. Between two episodes the scene carries the new world
+  // while the terrain is still the old one, and pairing them puts everything built in the
+  // middle of a map it is not in.
+  //
+  // Units, shots and effects carry coordinates, not indices, so none of that applies to
+  // them. Refusing to draw them too meant that with twenty-five matches rolling episodes
+  // the view spent most of its life showing bare ground: no agent moving, no waves
+  // arriving, no enemies, which is exactly what it looked like from outside.
+  const paired = !world.width || world.width === terrain.width;
 
   const view = { ox, oy, cols, rows, cell, sx, sy, now, tick, terrain };
-  drawBuildings(ctx, world, view);
-  drawBeltItems(ctx, world, view);
+  if (paired) {
+    drawBuildings(ctx, world, view);
+    drawBeltItems(ctx, world, view);
+  }
   drawUnits(ctx, world, { cell, sx, sy, now, alpha, tick, terrain });
   drawShots(ctx, world, { cell, sx, sy });
   drawEffects(ctx, world, { cell, sx, sy, now });
@@ -2435,13 +2457,31 @@ function renderReplays(matches) {
     return;
   }
   entries.sort((a, b) => b.reward - a.reward);
+  // Played here rather than handed to a second viewer that draws it its own way. A replay
+  // is the same stream this page already reads, so it opens in the same detail view, with
+  // the same sprites, the same shadows and the same scrub bar.
   host.innerHTML = entries.slice(0, 8).map(e => `
-    <a class="replay ${e.solved ? "solved" : ""}" target="_blank" rel="noopener"
-       href="index.html?replay=replay/${e.match}/${encodeURIComponent(e.file)}">
+    <a class="replay ${e.solved ? "solved" : ""}" href="#"
+       data-match="${e.match}" data-file="${encodeURIComponent(e.file)}">
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 9l5 3-5 3z"/></svg>
       #${e.match} · ${t("episodesShort")} ${e.episode}
       <span class="rw">${e.reward >= 0 ? "+" : ""}${e.reward.toFixed(2)}${e.solved ? " ✓" : ""}</span>
     </a>`).join("");
+
+  for (const link of host.querySelectorAll("a.replay")) {
+    link.onclick = async event => {
+      event.preventDefault();
+      try {
+        const answer = await (await fetch(
+          `watch/${link.dataset.match}/${link.dataset.file}`)).json();
+        // The state poll has to land before the match exists to be opened.
+        await refreshState();
+        openDetail(answer.match);
+      } catch {
+        // A replay that has already been pruned is an ordinary answer, not a fault.
+      }
+    };
+  }
 }
 
 function drawLearning(generations) {

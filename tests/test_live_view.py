@@ -424,10 +424,10 @@ def test_an_embodied_episode_is_replayed_through_a_body() -> None:
 
 
 def test_a_static_file_is_served_despite_a_query_string() -> None:
-    """`index.html?replay=...` answered 404 because the query was taken as part of the name.
+    """A query string is not part of a file name, and taking it as one answered 404.
 
     Every earlier route parsed its own query; the fallback that serves everything else
-    never did, so it looked on disk for a file literally called `index.html?replay=...`.
+    never did, so it looked on disk for a file called literally `dashboard.html?x=1`.
     """
     import urllib.request
 
@@ -435,6 +435,6 @@ def test_a_static_file_is_served_despite_a_query_string() -> None:
 
     monitor = TrainingMonitor(title="static")
     url = monitor.serve(8877)
-    with urllib.request.urlopen(f"{url}/index.html?replay=whatever", timeout=5) as answer:
+    with urllib.request.urlopen(f"{url}/dashboard.html?replay=whatever", timeout=5) as answer:
         assert answer.status == 200
         assert b"<html" in answer.read(2048).lower()
