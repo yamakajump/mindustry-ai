@@ -217,6 +217,11 @@ class MindustryEnv(gym.Env):
         self._last_stamp: dict[str, Any] | None = None
         self._last_connect: dict[str, Any] | None = None
 
+        #: When each tile was last built on, so tearing down fresh work can be told from
+        #: revising old work. See `CHURN_WINDOW`.
+        self._built_at: dict[tuple[int, int], int] = {}
+        self._churned = False
+
         self._dir = setup_server(server_dir or f"mindustry-env-{bridge_port}")
         if jar is not None:
             install_plugin(self._dir, jar)
@@ -439,6 +444,22 @@ class MindustryEnv(gym.Env):
             "global": np.asarray(values, dtype=np.float32),
         }
 
+    #: How long a building has to stand before pulling it down counts as revision.
+    #:
+    #: Demolishing is a tool: a belt that dead-ends, a line that wants rerouting, a drill in
+    #: the way of a better one. It is also the cheapest way to undo your own work, and once
+    #: the position mask let `break` actually reach a building the agent did little else.
+    #: Measured over 72 episodes of a live run: 2,996 demolitions against 2,673
+    #: placements, 80% of them on its own buildings, 812 place-then-break cycles on the
+    #: same tile and one tile touched eleven times.
+    #:
+    #: Pricing every demolition higher would stop that and stop revision with it, which is
+    #: worse: an agent that cannot afford to change its mind builds once and lives with it.
+    #: So the price falls on the pathology instead. Two hundred steps is a hundred seconds
+    #: of game time, long enough for a drill to have delivered something if it was ever
+    #: going to, and a structure older than that is being reconsidered rather than churned.
+    CHURN_WINDOW = 200
+
     #: The most a single connect may commit to, in blocks.
     #:
     #: A structure the agent cannot pay for and its one unit cannot reach is not a
@@ -503,6 +524,8 @@ class MindustryEnv(gym.Env):
         cells: list[tuple[int, int, str, int]] = []
         for dx, dy, _, _ in drills:
             cells.append((ox + x0 + dx, oy + y0 + dy, "mechanical-drill", 0))
+        for cx, cy, _, _ in cells:
+            self._built_at[(cx, cy)] = self._steps
         for px, py in ((cx - ox, cy - oy) for cx, cy, _, _ in cells):
             if 0 <= px < columns - 1 and 0 <= py < rows - 1:
                 passable[py:py + 2, px:px + 2] = False
@@ -644,9 +667,26 @@ class MindustryEnv(gym.Env):
             "cells": [[x, y, block, rotation] for x, y, block, rotation in cells],
         }
 
+    def _note_churn(self, kind: str, x: int, y: int) -> bool:
+        """Remember what was built where, and report tearing down something still fresh.
+
+        The distinction the reward cannot make on its own: it sees a count of buildings
+        deconstructed and nothing about which, so pulling down a drill laid four steps ago
+        and reworking a line that has been running for a minute look identical to it.
+        """
+        if kind in ("place", "build"):
+            self._built_at[(x, y)] = self._steps
+            return False
+        if kind != "break":
+            return False
+
+        built = self._built_at.pop((x, y), None)
+        return built is not None and self._steps - built < self.CHURN_WINDOW
+
     def _decode(self, action: np.ndarray) -> dict[str, Any] | None:
         kind = self.action_types[int(action[0])]
         x, y = int(action[2]), int(action[3])
+        self._churned = self._note_churn(kind, x, y)
 
         if kind == "noop":
             return None
@@ -808,6 +848,7 @@ class MindustryEnv(gym.Env):
 
         self._steps = 0
         self._last_obs = raw
+        self._built_at.clear()
 
         # A reward may keep a ledger across a step, and a ledger that survives a reset
         # would carry one episode's delivery into the next one's milestones.
@@ -823,6 +864,7 @@ class MindustryEnv(gym.Env):
 
         self._last_stamp = None
         self._last_connect = None
+        self._churned = False
         raw = bridge.step(repeat=self.task.ticks_per_step, action=self._decode(action))
         self._steps += 1
         if self._last_stamp is not None:
@@ -831,6 +873,9 @@ class MindustryEnv(gym.Env):
         elif self._last_connect is not None:
             raw = {**raw, "action": self._last_connect}
 
+        # Stated to the reward, which sees only a count of buildings deconstructed and so
+        # cannot tell undoing fresh work from reworking an old line.
+        raw = {**raw, "churn": 1 if self._churned else 0}
         reward = self.task.reward(self._last_obs, raw)
         won = self.task.succeeded(raw)
         lost = self.task.failed(raw)

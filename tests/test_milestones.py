@@ -354,3 +354,23 @@ def test_tearing_down_your_own_work_costs_something(reward) -> None:
     # revising an implantation dearer than leaving it to rot.
     torn = tasks.get("frontier").reward.terms(before, after)["torn"]
     assert abs(torn) < 0.5, "a player pulls things down to lay them again better"
+
+
+def test_undoing_fresh_work_costs_more_than_revising_old_work(reward) -> None:
+    """Two demolitions that look the same to a counter and are not the same act.
+
+    Pulling down a line that has been running is what a player does to lay it again better.
+    Pulling down a drill placed four steps ago is undoing your own work, and it was the
+    cheapest action on the board: measured over 72 episodes once the position mask let
+    `break` reach a building, 2,996 demolitions against 2,673 placements, 80% of them on
+    the agent's own buildings, and 812 place-then-break cycles on the same tile.
+    """
+    before = state(stats={"buildings_deconstructed": 4})
+    revision = state(stats={"buildings_deconstructed": 5})
+    undoing = state(stats={"buildings_deconstructed": 5}, churn=1)
+
+    assert reward(before, revision) == pytest.approx(-0.1)
+
+    scorer = tasks.get("frontier").reward
+    scorer.reset()
+    assert scorer(before, undoing) == pytest.approx(-2.1)

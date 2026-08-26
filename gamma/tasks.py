@@ -607,6 +607,20 @@ class _BuildAndHold:
             # against aimless churn is worth having at all, and why it should stay a nudge.
             "torn": (_stat("buildings_deconstructed")(after)
                      - _stat("buildings_deconstructed")(before)) * -0.1,
+            # Undoing work that never had time to do anything, which is a different act
+            # from revising a line that has been running.
+            #
+            # The counter behind `torn` says how many buildings came down and nothing about
+            # which, so those two look identical to it. The environment can tell them apart,
+            # because it knows what it placed and when, and it says so here. Measured over
+            # 72 episodes once breaking became possible: 2,996 demolitions against 2,673
+            # placements, 80% of them on the agent's own buildings, 812 place-then-break
+            # cycles on the same tile, one tile touched eleven times.
+            #
+            # Twenty ore, against one for an ordinary demolition. Pulling down a fresh drill
+            # has to cost more than the drill would have earned in the time it stood, or it
+            # stays the cheapest action on the board.
+            "churn": float(after.get("churn", 0)) * -2.0,
             "waves": (_wave(after) - _wave(before)) * 1.0,
             "damage": max(0.0, float(before.get("core_health", 0.0))
                           - float(after.get("core_health", 0.0))) * -0.005,
