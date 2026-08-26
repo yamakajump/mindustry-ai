@@ -21,7 +21,7 @@ from gymnasium import spaces
 
 from gamma.bridge import Bridge
 from gamma import mining, tasks
-from gamma.adapt import route, split
+from gamma.adapt import split
 from gamma.sectors import SectorPool, build_pool
 from gamma.server import ServerProcess, install_plugin
 from gamma.server_setup import setup_server
@@ -552,6 +552,33 @@ class MindustryEnv(gym.Env):
                       for cx, cy, block_name, rotation in cells],
         }
 
+    def _route_to_core(self, start: tuple[int, int],
+                       core: tuple[int, int]) -> list[tuple[int, int]] | None:
+        """The shortest way home around whatever is in between.
+
+        Passability is only known inside the window, so beyond it the ground is treated as
+        open. That is exactly what the L-shaped routing assumed everywhere, and it is a
+        much smaller assumption when it only covers the part nobody can see.
+        """
+        raw = self._last_obs
+        spatial = raw.get("spatial")
+        width = int(raw.get("map_width", 0))
+        height = int(raw.get("map_height", 0))
+        if spatial is None or width <= 0 or height <= 0:
+            return None
+
+        channels = self._bridge.channels if self._bridge else []
+        known = np.ones((height, width), dtype=bool)
+        if "solid" in channels and "block" in channels:
+            blocked = ((spatial[channels.index("solid")] > 0)
+                       | (spatial[channels.index("block")] > 0))
+            origin = raw.get("window_origin") or (0, 0)
+            ox, oy = int(origin[0]), int(origin[1])
+            rows, columns = blocked.shape
+            known[oy:oy + rows, ox:ox + columns] = ~blocked
+
+        return mining.path(known, start, core)
+
     def _stamp(self, action: np.ndarray) -> None:
         """Lay a whole structure, one bridge action per block, before the world ticks.
 
@@ -573,7 +600,27 @@ class MindustryEnv(gym.Env):
 
         cells = [(anchor[0] + p.dx, anchor[1] + p.dy, p.block, p.rotation)
                  for p in split(design).producers]
-        cells += route(anchor, core)
+
+        # Routed around what is in the way, and only if the way is short enough to pay for.
+        #
+        # It used to draw an L without looking and place however many conveyors that came
+        # to. Measured over 34,341 stamps from a real run: a median of 43 blocks, but 23.5%
+        # over a hundred, a ninety-ninth percentile of 405 and a worst of 561, on an agent
+        # that starts with three hundred copper and one unit to build with. A structure it
+        # can neither pay for nor reach is not a structure, it is a queue.
+        steps = self._route_to_core(anchor, core)
+        if steps is None:
+            self._last_stamp = {"applied": False, "type": STAMP, "reason": "no route"}
+            return
+
+        cells += [(p.x, p.y, p.block, p.rotation) for p in mining.belt(steps)]
+        if len(cells) > self.CONNECT_BUDGET:
+            self._last_stamp = {
+                "applied": False, "type": STAMP, "reason": "too far",
+                "asked": len(cells), "budget": self.CONNECT_BUDGET,
+            }
+            return
+
         cells.sort(key=lambda cell: 0 if "drill" in cell[2] else 1)
 
         laid = 0

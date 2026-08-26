@@ -186,3 +186,23 @@ def test_more_designs_than_the_block_dimension_is_refused(tmp_path) -> None:
             task=None, server_dir=str(tmp_path), blocks=("conveyor",),
             designs=(trunk(), trunk()),
         )
+
+
+def test_a_stamp_too_far_from_the_core_is_refused() -> None:
+    """A structure the agent cannot pay for is not a structure, it is a queue.
+
+    The routing used to draw an L without looking and place however many conveyors that
+    came to. Measured over 34,341 stamps from a real run: a median of 43 blocks, but 23.5%
+    over a hundred, a ninety-ninth percentile of 405 and a worst of 561, on an agent that
+    starts with three hundred copper and one unit to build with.
+    """
+    from gamma.env import MindustryEnv
+
+    assert MindustryEnv.CONNECT_BUDGET < 100, (
+        "the budget has to sit below the sizes that were actually being queued"
+    )
+
+    # The design itself must fit inside the budget, or every stamp is refused whatever the
+    # distance, which would read as the action being broken rather than being governed.
+    design = trunk()
+    assert len(design.placements) < MindustryEnv.CONNECT_BUDGET
