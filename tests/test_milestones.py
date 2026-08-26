@@ -333,3 +333,18 @@ def test_reached_reads_the_ledger_not_the_observation() -> None:
     assert "automation" not in {
         stone.name for stone in tasks.MILESTONES if stone.read(landed) >= stone.threshold
     }, "the observation alone cannot know, which is the whole point"
+
+
+def test_tearing_down_your_own_work_costs_something(reward) -> None:
+    """Demolishing was free, and the agent found that out the moment it could aim.
+
+    `lost` counts what the enemy destroys and says nothing about what the agent dismantles.
+    That was invisible while breaking was also impossible: the position mask offered
+    `break` only empty tiles, so across 6,660 attempts it hit natural walls and bare ground
+    and 23 of its own buildings. Masking positions by action type made breaking work, and
+    the first thing the agent did with it was cover its own drills in demolition orders.
+    """
+    before = state(stats={"buildings_deconstructed": 4})
+    after = state(stats={"buildings_deconstructed": 6})
+
+    assert reward(before, after) == pytest.approx(-1.0), "two buildings torn down, half each"

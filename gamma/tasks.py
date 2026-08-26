@@ -581,6 +581,21 @@ class _BuildAndHold:
                       - _stat("enemy_units_destroyed")(before)) * 2.0,
             "lost": (_stat("buildings_destroyed")(after)
                      - _stat("buildings_destroyed")(before)) * -0.5,
+            # Tearing down your own work, which was free and is not.
+            #
+            # `lost` counts what the enemy destroys and says nothing about what the agent
+            # dismantles, so demolishing cost exactly nothing. It was invisible for as long
+            # as it was also impossible: the position mask offered `break` only empty tiles,
+            # so it hit natural walls and bare ground and 23 of its own buildings across
+            # 6,660 attempts. Masking positions by action type made breaking work, and the
+            # first thing the agent did with it was cover its own drills and belts in
+            # demolition orders.
+            #
+            # Priced like a building lost to the enemy, because the outcome is the same and
+            # only the cause differs. Correcting a misplacement still costs about five ore
+            # of delivery, which is a real price and not a prohibition.
+            "torn": (_stat("buildings_deconstructed")(after)
+                     - _stat("buildings_deconstructed")(before)) * -0.5,
             "waves": (_wave(after) - _wave(before)) * 1.0,
             "damage": max(0.0, float(before.get("core_health", 0.0))
                           - float(after.get("core_health", 0.0))) * -0.005,
