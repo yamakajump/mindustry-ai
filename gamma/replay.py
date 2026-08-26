@@ -253,6 +253,10 @@ class ReplayRecorder:
                     "laid": int((outcome or {}).get("laid", 0)),
                     "asked": int((outcome or {}).get("asked", 0)),
                     "cells": (outcome or {}).get("cells") or [],
+                    # Why it came to nothing, which is the whole diagnosis when nearly
+                    # nine attempts in ten come to nothing: 2,357 refusals out of 2,671
+                    # connects, and the recording could not say what any of them hit.
+                    "reason": (outcome or {}).get("reason", ""),
                 }
             elif kind == "stamp":
                 # A whole structure in one decision, so the frame carries how much of it

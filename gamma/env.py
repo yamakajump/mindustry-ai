@@ -482,6 +482,7 @@ class MindustryEnv(gym.Env):
         raw = self._last_obs
         core = (int(raw.get("core_x", -1)), int(raw.get("core_y", -1)))
         if core[0] < 0 or "spatial" not in raw:
+            self._last_connect = {"applied": False, "type": CONNECT, "reason": "no world yet"}
             return
 
         spatial = raw["spatial"]
@@ -555,11 +556,19 @@ class MindustryEnv(gym.Env):
             return
 
         laid = 0
+        refusal = ""
         for cx, cy, block_name, rotation in cells:
             outcome = bridge.act({"type": "build" if self.embodied else "place",
                                   "block": block_name, "x": cx, "y": cy,
                                   "rotation": rotation})
-            laid += bool((outcome.get("action") or {}).get("applied"))
+            answer = outcome.get("action") or {}
+            laid += bool(answer.get("applied"))
+            # Kept from the first block the world turned down, because a connect that lays
+            # nothing says nothing about why on its own: 2,357 of them were recorded as
+            # refused with no reason at all, and the answer turned out to be that the
+            # agent was broke.
+            if not refusal and not answer.get("applied"):
+                refusal = str(answer.get("reason", ""))
 
         # What the packer believed it was doing, kept beside what was asked for. The two
         # disagreeing is a coordinate bug, and a coordinate bug here is invisible: the
@@ -571,6 +580,7 @@ class MindustryEnv(gym.Env):
             "origin": [ox, oy], "patch": [x0, y0],
             "believed_ore": believed,
             "drills": len(drills), "laid": laid, "asked": len(cells),
+            "reason": "" if laid else (refusal or "nothing accepted"),
             "cells": [[cx, cy, block_name, rotation]
                       for cx, cy, block_name, rotation in cells],
         }
@@ -758,6 +768,14 @@ class MindustryEnv(gym.Env):
             return {"type": "demolish" if self.embodied else "break", "x": x, "y": y}
         return None
 
+    def _affordable_design(self, affordable: set[str]) -> bool:
+        """Whether any loaded design could be paid for as it stands."""
+        for design in self.designs:
+            parts = split(design).producers
+            if parts and all(part.block in affordable for part in parts):
+                return True
+        return False
+
     def _masks(self, obs: dict[str, Any]) -> dict[str, np.ndarray]:
         """Legality hints for the action heads.
 
@@ -785,10 +803,14 @@ class MindustryEnv(gym.Env):
         # produced 98 refusals out of 120 once the starting copper ran out.
         if not self.embodied:
             legal = [True, bool(block_mask.any() and free.any()), bool(owned.any())]
+            # Gated on paying for the line and for the design, exactly as in the embodied
+            # branch. Two copies of one rule is how the direct mode came to offer actions
+            # the other had already learned to withhold.
+            affords_a_line = ("mechanical-drill" in affordable) and ("conveyor" in affordable)
             if self.mining:
-                legal.append(bool(free.any()))
+                legal.append(bool(free.any() and affords_a_line))
             if self.designs:
-                legal.append(bool(block_mask.any() and free.any()))
+                legal.append(bool(free.any() and self._affordable_design(affordable)))
             return {
                 "type": np.array(legal, dtype=bool),
                 "block": block_mask,
@@ -840,14 +862,28 @@ class MindustryEnv(gym.Env):
         # across 177 archived episodes and one line that ever met end to end. The
         # mechanism built for it, the designs and the forge that breeds them, has been
         # switched off the entire time while every run passed --designs.
-        # Offered when there is ore in view worth a drill and somewhere to put the belt.
-        # Cheaper to check here than to let the agent choose it and be refused: a refusal
-        # it cannot see coming teaches it nothing except that the action is bad.
+        # Offered when there is ore in view worth a drill, somewhere to put the belt, and
+        # the copper to pay for both. Cheaper to check here than to let the agent choose it
+        # and be refused: a refusal it cannot see coming teaches it nothing except that the
+        # action is bad.
+        #
+        # Affordability was the part missing, and it was most of the episode. `connect`
+        # asks the world for up to sixty blocks at once and reports failure only when not
+        # one of them is accepted, so a broke agent standing on ore was offered it every
+        # step, asked for sixty drills and conveyors it could not pay for, and had all
+        # sixty refused. Measured over eleven episodes: 2,357 refusals out of 2,671
+        # connects, 88% of them, and connect refusals alone were 80% of every refused
+        # action in the run.
+        affords_a_line = ("mechanical-drill" in affordable) and ("conveyor" in affordable)
         if self.mining:
-            legal.append(bool(mineable.any() and free.any()))
+            legal.append(bool(mineable.any() and free.any() and affords_a_line))
 
+        # Gated on the blocks a design actually needs, not on affording any block at all.
+        # A design is a fixed list of parts, so affording a conveyor says nothing about
+        # affording the press the structure is built around, and the agent was offered the
+        # stamp on the strength of the cheapest thing in the game.
         if self.designs:
-            legal.append(bool(block_mask.any() and free.any()))
+            legal.append(bool(free.any() and self._affordable_design(affordable)))
 
         return {
             "type": np.array(legal, dtype=bool),

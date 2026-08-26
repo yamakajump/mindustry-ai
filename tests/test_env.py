@@ -230,3 +230,28 @@ def test_a_refused_placement_does_not_go_on_the_ledger(env: MindustryEnv) -> Non
     env._note_churn("place", 7, 7)
     _settle(env, applied=True)
     assert (7, 7) in env._built_at
+
+
+def test_connect_is_not_offered_to_an_agent_that_cannot_pay_for_a_line(
+        env: MindustryEnv, monkeypatch) -> None:
+    """It asks for sixty blocks at once and fails only if not one is accepted.
+
+    So a broke agent standing on ore was offered it every step, asked for sixty drills and
+    conveyors it could not pay for, and had all sixty refused. Measured over eleven
+    episodes: 2,357 refusals out of 2,671 connects, and connect refusals alone were 80% of
+    every refused action in the run.
+    """
+    if not env.mining:
+        pytest.skip("this build has no connect")
+
+    observation, info = env.reset()
+    where = env.action_types.index("connect")
+
+    monkeypatch.setattr(env._bridge, "affordable_blocks", lambda: ["conveyor"])
+    assert not env._masks(env._last_obs)["type"][where], "no drill, no line"
+
+    monkeypatch.setattr(env._bridge, "affordable_blocks",
+                        lambda: ["conveyor", "mechanical-drill"])
+    offered = env._masks(env._last_obs)["type"][where]
+    assert offered or not env._masks(env._last_obs)["mineable"].any(), (
+        "with ore in view and the copper for both, it must be on the table")
