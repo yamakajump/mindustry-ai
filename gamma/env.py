@@ -220,6 +220,8 @@ class MindustryEnv(gym.Env):
         #: When each tile was last built on, so tearing down fresh work can be told from
         #: revising old work. See `CHURN_WINDOW`.
         self._built_at: dict[tuple[int, int], int] = {}
+        self._breaking: tuple[int, int] = (0, 0)
+        self._placing: tuple[int, int] | None = None
         self._churned = False
 
         self._dir = setup_server(server_dir or f"mindustry-env-{bridge_port}")
@@ -685,20 +687,49 @@ class MindustryEnv(gym.Env):
         The distinction the reward cannot make on its own: it sees a count of buildings
         deconstructed and nothing about which, so pulling down a drill laid four steps ago
         and reworking a line that has been running for a minute look identical to it.
+
+        Judged on the intent here and settled once the world has answered, because a
+        refused demolition tears nothing down. Charging it would price an attempt that
+        changed nothing, and forgetting the tile on the way would let the demolition that
+        does land a moment later go free.
         """
-        if kind in ("place", "build"):
+        self._placing = (x, y) if kind in ("place", "build") else None
+        if self._placing is not None:
             self._built_at[(x, y)] = self._steps
             return False
         if kind != "break":
             return False
 
-        built = self._built_at.pop((x, y), None)
+        built = self._built_at.get((x, y))
         return built is not None and self._steps - built < self.CHURN_WINDOW
+
+    def _settle_churn(self, raw: dict[str, Any]) -> None:
+        """Keep only what the world accepted, in both directions.
+
+        A refused demolition tears nothing down, so charging it would price an attempt
+        that changed nothing and forgetting the tile on the way would let the demolition
+        that does land a moment later go free. A refused placement builds nothing either,
+        and leaving it on the ledger would charge the agent for later clearing a building
+        it never owned.
+        """
+        applied = bool((raw.get("action") or {}).get("applied", False))
+        if self._placing is not None:
+            if not applied:
+                self._built_at.pop(self._placing, None)
+            self._placing = None
+            return
+        if not self._churned:
+            return
+        if not applied:
+            self._churned = False
+            return
+        self._built_at.pop(self._breaking, None)
 
     def _decode(self, action: np.ndarray) -> dict[str, Any] | None:
         kind = self.action_types[int(action[0])]
         x, y = int(action[2]), int(action[3])
         self._churned = self._note_churn(kind, x, y)
+        self._breaking = (x, y)
 
         if kind == "noop":
             return None
@@ -877,6 +908,7 @@ class MindustryEnv(gym.Env):
         self._last_stamp = None
         self._last_connect = None
         self._churned = False
+        self._placing = None
         raw = bridge.step(repeat=self.task.ticks_per_step, action=self._decode(action))
         self._steps += 1
         if self._last_stamp is not None:
@@ -887,6 +919,7 @@ class MindustryEnv(gym.Env):
 
         # Stated to the reward, which sees only a count of buildings deconstructed and so
         # cannot tell undoing fresh work from reworking an old line.
+        self._settle_churn(raw)
         raw = {**raw, "churn": 1 if self._churned else 0}
         reward = self.task.reward(self._last_obs, raw)
         won = self.task.succeeded(raw)

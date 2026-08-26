@@ -205,13 +205,22 @@ class ReplayRecorder:
         # any divergence compounds, so a replay drifts from the episode it claims to show.
         if scene:
             frame["scene"] = _trimmed(scene)
-        if outcome is not None and not outcome.get("applied", True):
+        applied = bool((outcome or {}).get("applied", False))
+        if action is not None and not applied:
             frame["refused"] = 1
 
         # The action itself is recorded, not just which tiles changed. Deltas say a tile
         # became occupied; only the action says by what, and a viewer needs the block
         # identity to pick a sprite. It also costs less than the deltas it replaces.
-        if action is not None and outcome is not None and outcome.get("applied"):
+        # Recorded whether or not it took effect, with `refused` saying which.
+        #
+        # Only applied actions were written down at first, and the hole was a third of the
+        # episode: over 27,718 frames, 52.8% carried no action at all while just 19.9% were
+        # marked refused. The rest were steps the bridge answered without an outcome, so
+        # the recording simply lost what the agent had asked for, and every count taken
+        # from a replay was short by that third without any sign of it. A replay that
+        # cannot show an attempt cannot show a mistake either.
+        if action is not None:
             # By name, never by index. The embodied action space puts `move` and `build`
             # where the direct one puts `place` and `break`, so a hardcoded index records
             # a move as a construction and the viewer draws a block that was never built.
@@ -237,13 +246,13 @@ class ReplayRecorder:
                 # agent that built nothing.
                 frame["act"] = {
                     "t": "connect",
-                    "x": int(outcome.get("x", 0)), "y": int(outcome.get("y", 0)),
-                    "drills": int(outcome.get("drills", 0)),
-                    "believed": int(outcome.get("believed_ore", 0)),
-                    "origin": outcome.get("origin") or [0, 0],
-                    "laid": int(outcome.get("laid", 0)),
-                    "asked": int(outcome.get("asked", 0)),
-                    "cells": outcome.get("cells") or [],
+                    "x": int((outcome or {}).get("x", 0)), "y": int((outcome or {}).get("y", 0)),
+                    "drills": int((outcome or {}).get("drills", 0)),
+                    "believed": int((outcome or {}).get("believed_ore", 0)),
+                    "origin": (outcome or {}).get("origin") or [0, 0],
+                    "laid": int((outcome or {}).get("laid", 0)),
+                    "asked": int((outcome or {}).get("asked", 0)),
+                    "cells": (outcome or {}).get("cells") or [],
                 }
             elif kind == "stamp":
                 # A whole structure in one decision, so the frame carries how much of it
@@ -251,11 +260,11 @@ class ReplayRecorder:
                 # between a design the policy placed well and one it dropped on a wall.
                 frame["act"] = {
                     "t": "stamp",
-                    "d": int(outcome.get("design", 0)),
-                    "x": int(outcome.get("x", 0)), "y": int(outcome.get("y", 0)),
-                    "laid": int(outcome.get("laid", 0)),
-                    "asked": int(outcome.get("asked", 0)),
-                    "cells": outcome.get("cells") or [],
+                    "d": int((outcome or {}).get("design", 0)),
+                    "x": int((outcome or {}).get("x", 0)), "y": int((outcome or {}).get("y", 0)),
+                    "laid": int((outcome or {}).get("laid", 0)),
+                    "asked": int((outcome or {}).get("asked", 0)),
+                    "cells": (outcome or {}).get("cells") or [],
                 }
         return frame
 

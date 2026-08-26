@@ -187,3 +187,46 @@ def test_every_way_of_building_is_remembered(env: MindustryEnv) -> None:
     env._remember([(8, 9, "conveyor", 0)])
     env._steps = 10 + env.CHURN_WINDOW + 1
     assert env._note_churn("break", 8, 9) is False
+
+
+def _settle(env, applied: bool) -> None:
+    env._settle_churn({"action": {"applied": applied}})
+
+
+def test_a_refused_demolition_is_not_charged_and_the_tile_is_not_forgotten(
+        env: MindustryEnv) -> None:
+    """Charging a refused break prices an attempt that changed nothing.
+
+    Worse, popping the tile on the way would let the demolition that does land a moment
+    later go free, so a single refusal would launder the very behaviour being priced.
+    """
+    env._built_at.clear()
+    env._steps = 10
+    env._remember([(3, 3, "conveyor", 0)])
+
+    env._churned = env._note_churn("break", 3, 3)
+    env._breaking = (3, 3)
+    assert env._churned is True
+    _settle(env, applied=False)
+    assert env._churned is False, "nothing was torn down, so nothing is owed"
+    assert (3, 3) in env._built_at, "the tile still stands and is still the agent's"
+
+    env._churned = env._note_churn("break", 3, 3)
+    env._breaking = (3, 3)
+    _settle(env, applied=True)
+    assert env._churned is True
+    assert (3, 3) not in env._built_at, "it is gone now, so the ledger lets it go"
+
+
+def test_a_refused_placement_does_not_go_on_the_ledger(env: MindustryEnv) -> None:
+    """Otherwise the agent is later charged for clearing a building it never owned."""
+    env._built_at.clear()
+    env._steps = 10
+
+    env._note_churn("place", 7, 7)
+    _settle(env, applied=False)
+    assert (7, 7) not in env._built_at
+
+    env._note_churn("place", 7, 7)
+    _settle(env, applied=True)
+    assert (7, 7) in env._built_at
