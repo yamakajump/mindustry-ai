@@ -308,7 +308,9 @@ def check_actions_land(episodes) -> bool:
     for _, frames in episodes:
         for frame in frames:
             act = frame.get("act")
-            if not act:
+            # A pass asks the world for nothing, so it can neither land nor be refused.
+            # Counting it put 44,622 phantom refusals into a run of 152,750 actions.
+            if not act or act.get("t") == "noop":
                 continue
             total += 1
             if frame.get("refused"):

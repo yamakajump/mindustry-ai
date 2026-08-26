@@ -658,10 +658,16 @@ class MindustryEnv(gym.Env):
         cells.sort(key=lambda cell: 0 if "drill" in cell[2] else 1)
 
         laid = 0
+        refusal = ""
         for x, y, block, rotation in cells:
             outcome = bridge.act({"type": "build" if self.embodied else "place",
                                   "block": block, "x": x, "y": y, "rotation": rotation})
-            laid += bool((outcome.get("action") or {}).get("applied"))
+            answer = outcome.get("action") or {}
+            laid += bool(answer.get("applied"))
+            # Why the first block was turned down, as for a connect. A stamp that lays
+            # nothing was recorded as refused with no reason at all 14,384 times.
+            if not refusal and not answer.get("applied"):
+                refusal = str(answer.get("reason", ""))
 
         # Reported, because a stamp applies outside the step protocol and therefore
         # produced no outcome at all. The recorder only writes an action it can see
@@ -672,6 +678,7 @@ class MindustryEnv(gym.Env):
             "applied": laid > 0, "type": STAMP,
             "design": int(action[1]) % len(self.designs),
             "x": anchor[0], "y": anchor[1], "laid": laid, "asked": len(cells),
+            "reason": "" if laid else (refusal or "nothing accepted"),
             # The cells themselves, because a viewer derives what stands from the actions
             # it was given and a stamp is fifty placements reported as one. Without them a
             # replay of a stamping agent shows an empty map while it builds.

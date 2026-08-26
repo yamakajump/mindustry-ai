@@ -159,3 +159,27 @@ def test_worth_does_not_override_the_floor() -> None:
     ore[5, 5] = 2
 
     assert mining.pack(ore, size=2, minimum=2, worth={2: 25.0}) == []
+
+
+def test_an_open_run_of_sixty_tiles_is_found() -> None:
+    """The cap was bounding the ordinary case, not the walled-off one.
+
+    Breadth-first spreads in every direction at once, so a core sixty tiles away costs on
+    the order of eleven thousand tiles explored against a cap of four thousand: a search
+    that could not reach past about thirty-five tiles however open the ground. It reported
+    "no route", which reads as terrain and was arithmetic. Measured over 183 episodes:
+    17,542 connects refused for no route, the largest single cause of a refused action.
+    """
+    passable = np.ones((80, 80), dtype=bool)
+    steps = mining.path(passable, (5, 40), (65, 40))
+
+    assert steps is not None, "sixty tiles of open ground is not a walled-off goal"
+    assert len(steps) == 61, "and the way there is still the shortest one"
+
+
+def test_the_cap_still_bounds_a_hopeless_search() -> None:
+    """It exists so a walled-off goal costs a bounded amount of time."""
+    passable = np.ones((200, 200), dtype=bool)
+    passable[:, 100] = False
+
+    assert mining.path(passable, (0, 0), (199, 199)) is None

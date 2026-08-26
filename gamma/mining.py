@@ -24,7 +24,7 @@ covers. So a drill's worth is the count of its dominant ore, not the count of or
 
 from __future__ import annotations
 
-from collections import deque
+import heapq
 from dataclasses import dataclass
 
 import numpy as np
@@ -113,13 +113,22 @@ def path(passable: np.ndarray, start: tuple[int, int],
          goal: tuple[int, int], limit: int = 4000) -> list[tuple[int, int]] | None:
     """The shortest way from one tile to another, around whatever is in between.
 
-    Breadth-first, so the first path found is the shortest, and short matters twice: a
+    A* with a Manhattan heuristic, which on a four-connected grid of equal steps never
+    overestimates, so the first path found is still the shortest. Short matters twice: a
     conveyor costs a copper per tile and every extra tile is another tile of line to build
     before a single ore moves.
 
-    The old routing was an L drawn without looking, which is fine on open ground and lays
-    a line through a cliff otherwise. `limit` caps the search so a walled-off goal costs a
-    bounded amount of time rather than scanning the map.
+    It was a plain breadth-first search, and the cap meant to bound a walled-off goal was
+    bounding the ordinary case instead. Breadth-first spreads in every direction at once,
+    so reaching a core sixty tiles away costs on the order of eleven thousand tiles
+    explored, and the cap sat at four thousand: a search that could not reach past about
+    thirty-five tiles no matter how open the ground was. It reported "no route" either way,
+    which reads as terrain and was arithmetic. Measured over 183 episodes: 17,542 connects
+    refused for no route, the single largest cause of a refused action in the run.
+
+    The heuristic pulls the search towards the goal instead of around it, so open ground
+    costs about the length of the path rather than its square, and the cap goes back to
+    doing what it was for.
     """
     rows, columns = passable.shape
     sx, sy = start
@@ -128,11 +137,14 @@ def path(passable: np.ndarray, start: tuple[int, int],
         return None
 
     came: dict[tuple[int, int], tuple[int, int] | None] = {(sx, sy): None}
-    queue = deque([(sx, sy)])
+    cost = {(sx, sy): 0}
+    queue = [(abs(sx - gx) + abs(sy - gy), 0, sx, sy)]
     seen = 0
 
     while queue:
-        x, y = queue.popleft()
+        _, spent, x, y = heapq.heappop(queue)
+        if spent > cost.get((x, y), spent):
+            continue
         seen += 1
         if seen > limit:
             return None
@@ -145,14 +157,18 @@ def path(passable: np.ndarray, start: tuple[int, int],
 
         for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
             nx, ny = x + dx, y + dy
-            if not (0 <= nx < columns and 0 <= ny < rows) or (nx, ny) in came:
+            if not (0 <= nx < columns and 0 <= ny < rows):
                 continue
             # The goal is the core, which is not passable and does not need to be: the
             # last conveyor points at it rather than standing on it.
             if not passable[ny, nx] and (nx, ny) != (gx, gy):
                 continue
+            if spent + 1 >= cost.get((nx, ny), 1 << 30):
+                continue
+            cost[(nx, ny)] = spent + 1
             came[(nx, ny)] = (x, y)
-            queue.append((nx, ny))
+            heapq.heappush(queue, (spent + 1 + abs(nx - gx) + abs(ny - gy),
+                                   spent + 1, nx, ny))
 
     return None
 
