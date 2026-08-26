@@ -1455,6 +1455,10 @@ function drawMatch(canvas, match, terrain, world, zoom, now) {
   // single copy instead of two scaled mask multiplies per match.
   ctx.drawImage(background(terrain, world, ox, oy, cols, rows, cell, !zoom), bx, by);
 
+  // Before the guard below, because a spawn belongs to the map and not to the scene: it
+  // is still worth drawing on the frames where the two disagree about which map is loaded.
+  drawDropZones(ctx, terrain, { cell, sx, sy });
+
   const tick = lerp(world.fromTick, world.tick, alpha);
   // Entities are addressed by tile index, which only decodes against the width of the map
   // they are on. Between two episodes the scene can carry the new world while the terrain
@@ -1468,6 +1472,57 @@ function drawMatch(canvas, match, terrain, world, zoom, now) {
   drawUnits(ctx, world, { cell, sx, sy, now, alpha, tick, terrain });
   drawShots(ctx, world, { cell, sx, sy });
   drawEffects(ctx, world, { cell, sx, sy, now });
+}
+
+/**
+ * The circle around each enemy spawn, drawn the way the game draws it.
+ *
+ * Mindustry marks a spawn with a dashed red ring of `dropZoneRadius` and refuses to let
+ * anything be built inside it. Drawn as a single overlay tile instead, which is what this
+ * did, the ground under it looks as usable as any other and is not, and somebody watching
+ * an agent build into a spawn cannot see why the placements were refused.
+ *
+ * Spawn tiles are found once per terrain and remembered: they do not move, and scanning a
+ * hundred and ninety thousand tiles per frame per match would cost more than everything
+ * else on the page put together.
+ */
+function drawDropZones(ctx, terrain, view) {
+  if (!terrain.spawns) {
+    terrain.spawns = [];
+    const id = Object.entries(terrain.palette)
+      .find(([, entry]) => entry && entry.name === "spawn");
+    if (id) {
+      const wanted = Number(id[0]);
+      for (let i = 0; i < terrain.overlay.length; i++) {
+        if (terrain.overlay[i] === wanted) {
+          terrain.spawns.push([i % terrain.width, Math.floor(i / terrain.width)]);
+        }
+      }
+    }
+  }
+  if (!terrain.spawns.length) return;
+
+  // Fallback to the engine default when the bridge is older than this field, so a replay
+  // recorded before it still shows a ring of about the right size rather than none.
+  const radius = (terrain.drop_zone_radius || 37.5) * view.cell;
+  if (radius < 4) return;
+
+  ctx.save();
+  ctx.strokeStyle = "rgba(242,85,85,.75)";
+  ctx.lineWidth = Math.max(1, view.cell * 0.25);
+  ctx.setLineDash([view.cell * 2, view.cell * 2]);
+  for (const [x, y] of terrain.spawns) {
+    const px = view.sx(x) + view.cell / 2, py = view.sy(y) + view.cell / 2;
+    if (px < -radius || py < -radius
+        || px > ctx.canvas.width + radius || py > ctx.canvas.height + radius) continue;
+    ctx.beginPath();
+    ctx.arc(px, py, radius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(242,85,85,.10)";
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 /**

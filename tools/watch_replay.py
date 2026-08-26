@@ -54,6 +54,7 @@ def terrain_of(header: dict) -> dict:
         "width": header["width"],
         "height": header["height"],
         "palette": header["palette"],
+        "drop_zone_radius": header.get("drop_zone_radius", 0),
         "floor": header["floor"],
         "overlay": header["overlay"],
         "block": header["block"],

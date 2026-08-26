@@ -505,6 +505,13 @@ public class StepLoop implements ApplicationListener {
         reply.put("palette", exporter.palette());
         reply.put("layout", exporter.layout());
 
+        // The circle the game draws around every enemy spawn, and refuses to let you build
+        // inside. A viewer that leaves it out shows a patch of ground that looks as usable
+        // as any other and is not, which is exactly the sort of thing somebody watching an
+        // agent needs to see. In tiles, because everything else in this reply is.
+        reply.put("drop_zone_radius",
+            Vars.state.rules == null ? 0 : Vars.state.rules.dropZoneRadius / Vars.tilesize);
+
         byte[] planes = exporter.planes();
         Jval spec = Jval.newObject();
         spec.put("bytes", planes.length);

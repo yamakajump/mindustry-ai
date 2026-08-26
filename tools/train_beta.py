@@ -286,6 +286,9 @@ class EnvWorker:
             "width": typed["width"],
             "height": typed["height"],
             "palette": typed["palette"],
+            # The no-build circle around each enemy spawn, so a viewer can draw the ground
+            # the agent is not allowed to use rather than leave it looking ordinary.
+            "drop_zone_radius": typed.get("drop_zone_radius", 0),
             "floor": _encode_bytes(planes[0:tiles * 2]),
             "overlay": _encode_bytes(planes[tiles * 2:tiles * 4]),
             "block": _encode_bytes(planes[tiles * 4:tiles * 6]),

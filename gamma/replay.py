@@ -124,6 +124,7 @@ class ReplayRecorder:
             "height": typed["height"],
             "core": [int(raw.get("core_x", -1)), int(raw.get("core_y", -1))],
             "palette": typed["palette"],
+            "drop_zone_radius": typed.get("drop_zone_radius", 0),
             "blocks": list(self.env.blocks),
             # Each plane base64 of zlib, decodable in a browser with DecompressionStream.
             "floor": _encode_bytes(planes[0:tiles * 2]),
