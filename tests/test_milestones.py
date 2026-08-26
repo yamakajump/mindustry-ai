@@ -71,14 +71,36 @@ def test_breaking_and_rebuilding_pays_nothing(reward) -> None:
 
 
 def test_the_first_automated_ore_is_the_biggest_single_step(reward) -> None:
-    """The moment the project exists to reach: ore arrived without a hand carrying it."""
+    """The moment the project exists to reach: ore arrived without a hand carrying it.
+
+    Compared against one wave, not against five at once. A wave counter advances by one,
+    so a step that crosses every wave rung in the ladder is not a step the game can
+    produce, and holding the reward to it priced a leap that cannot happen: it forced the
+    defensive rungs to stay so small that the middle of the game paid nothing, which is
+    the hole the agent died in at wave three.
+    """
     step = reward(state(), state(produced={"copper": 1}))
     others = [
         reward(state(), state(placed={"production": 1})),
         reward(state(), state(placed={"turret": 1})),
-        reward(state(), state(wave=5)),
+        reward(state(wave=4), state(wave=5)),
     ]
     assert step > max(others)
+
+
+def test_no_single_wave_out_pays_the_first_automated_ore(reward) -> None:
+    """The guarantee the five-wave leap was standing in for, stated properly.
+
+    Waves arrive one at a time, so this is every crossing the game can actually make.
+
+    Stopped below wave ten, and the reason is worth stating rather than hiding in a range:
+    wave ten is the task's own definition of winning, so it is allowed to pay more than
+    anything else. Checking it here would be asserting that the win is not the point.
+    """
+    automation = reward(state(), state(produced={"copper": 1}))
+    for wave in range(1, 10):
+        assert reward(state(wave=wave - 1), state(wave=wave)) < automation, (
+            f"crossing into wave {wave} out-pays the first automated ore")
 
 
 def test_thresholds_crossed_along_the_way_all_pay(reward) -> None:

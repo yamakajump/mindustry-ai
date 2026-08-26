@@ -420,11 +420,26 @@ MILESTONES: tuple[Milestone, ...] = (
     Milestone("two_ores", _credited_variety, 2, 20.0),
     Milestone("three_ores", _credited_variety, 3, 30.0),
     Milestone("first_kill", _stat("enemy_units_destroyed"), 1, 20.0),
+    # The defensive rungs used to jump from one kill straight to twenty-five, and from
+    # wave five straight to ten, while the economic ones stepped 1, 100, 1k, 10k. The
+    # agent learned exactly the shape of that ladder: 140 items delivered per episode and
+    # dead at wave three. Measured over 183 episodes, 124 of them ended at wave two or
+    # three, so every rung above was unreachable and the whole middle of the game paid
+    # nothing at all.
+    #
+    # Reachable but not free, which is what a rung has to be. Wave two is reached by every
+    # episode and would be a gift; wave four is reached by fewer than a third and is the
+    # next thing worth learning.
+    Milestone("five_kills", _stat("enemy_units_destroyed"), 5, 10.0),
+    Milestone("ten_kills", _stat("enemy_units_destroyed"), 10, 15.0),
     Milestone("held_a_wave", _stat("enemy_units_destroyed"), 25, 30.0),
     Milestone("first_power", _placed("power"), 1, 15.0),
     Milestone("first_crafter", _placed("crafting"), 1, 25.0),
     Milestone("first_factory", _placed("units"), 1, 25.0),
+    Milestone("wave_3", _wave, 3, 8.0),
+    Milestone("wave_4", _wave, 4, 12.0),
     Milestone("wave_5", _wave, 5, 15.0),
+    Milestone("wave_7", _wave, 7, 20.0),
     Milestone("wave_10", _wave, 10, 30.0),
     Milestone("wave_20", _wave, 20, 60.0),
 )

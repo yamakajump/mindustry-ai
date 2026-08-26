@@ -143,3 +143,29 @@ def test_each_caller_gets_its_own_ledger():
     assert other.reward.credited == pytest.approx(0.0), (
         "a delivery credited in one environment was visible in another"
     )
+
+
+def test_the_defensive_ladder_has_no_hole_where_the_agent_actually_dies():
+    """A rung nobody can reach pays nothing, and the middle of the game had none.
+
+    The economic rungs stepped 1, 100, 1k, 10k while the defensive ones jumped from one
+    kill to twenty-five and from wave five to ten. The agent learned exactly that shape:
+    140 items delivered per episode and dead at wave three. Measured over 183 episodes,
+    124 ended at wave two or three, so every defensive rung above was out of reach.
+    """
+    waves = sorted(m.threshold for m in tasks.MILESTONES if m.name.startswith("wave_"))
+    kills = sorted(m.threshold for m in tasks.MILESTONES
+                   if "kill" in m.name or m.name == "held_a_wave")
+
+    assert 3 in waves and 4 in waves, "the waves the agent dies on must be worth something"
+    assert max(b / a for a, b in zip(waves, waves[1:])) <= 2.0, (
+        "no defensive rung may be more than a doubling away from the one below")
+    assert max(b / a for a, b in zip(kills, kills[1:])) <= 5.0, (
+        "one kill straight to twenty-five is a hole, not a ladder")
+
+
+def test_no_milestone_is_free():
+    """A rung every episode crosses without trying is a payment, not a lesson."""
+    assert all(m.threshold >= 1 for m in tasks.MILESTONES)
+    waves = [m.threshold for m in tasks.MILESTONES if m.name.startswith("wave_")]
+    assert min(waves) >= 3, "every episode reaches wave two, so it cannot be a rung"

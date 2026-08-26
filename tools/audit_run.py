@@ -146,7 +146,12 @@ def check_annuity(episodes) -> bool:
             items = frame.get("items")
             if items is None:
                 continue
-            if previous is not None and items == previous and not frame.get("act"):
+            # A pass counts as nothing happening, which is the whole point of the check.
+            # Once `noop` started being recorded like any other action, every frame had
+            # one, this found no quiet step at all, and the check reported "0 payes sur 0"
+            # in green. A dead check reads exactly like a passing one.
+            acted = (frame.get("act") or {}).get("t", "noop") != "noop"
+            if previous is not None and items == previous and not acted:
                 quiet += 1
                 terms = frame.get("terms")
                 if terms is None:
