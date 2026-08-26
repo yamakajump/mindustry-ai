@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 from gymnasium import spaces
 
+from gamma import env as env_module
 from gamma import tasks
 from gamma.alpha import AlphaPolicy
 from gamma.env import ACTION_TYPES, GLOBAL_FIELDS, MindustryEnv
@@ -324,3 +325,26 @@ def test_ore_too_hard_for_the_unit_is_not_offered(env: MindustryEnv, monkeypatch
     mineable = env._masks(obs)["mineable"]
     assert mineable[0, 0], "the soft ore is on the table"
     assert not mineable[0, 1:len(ores)].any(), "and nothing the unit cannot touch is"
+
+
+def test_the_agent_can_tell_where_its_core_is(env: MindustryEnv) -> None:
+    """Nothing in the observation used to say where home was.
+
+    The agent knew its own position and its core's health and never the core's position,
+    so it could not tell how far from home it was nor which way home lay. The window is
+    forty-eight tiles and follows the unit, so once it wandered the core was not in the
+    picture at all. It went on building defences where it happened to be standing:
+    measured over 174 lost cores, 9.4 turrets and 16.8 walls per episode, laid a median of
+    60 tiles from the core and 105 on average.
+    """
+    fields = [name for name, _ in env_module.GLOBAL_FIELDS]
+    assert "core_dx" in fields and "core_dy" in fields
+
+    encoded = env._encode({
+        "spatial": np.zeros((len(env._bridge.channels), 4, 4), dtype=np.uint8),
+        "core_x": 100.0, "core_y": 40.0,
+        "unit": {"x": 60, "y": 55},
+    })
+    scale = dict(env_module.GLOBAL_FIELDS)["core_dx"]
+    assert encoded["global"][fields.index("core_dx")] == pytest.approx(40.0 / scale)
+    assert encoded["global"][fields.index("core_dy")] == pytest.approx(-15.0 / scale)

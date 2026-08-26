@@ -302,6 +302,39 @@ class PPO:
         torch.save({"net": self.net.state_dict(), "updates": self.updates}, path)
 
     def load(self, path) -> None:
+        """Resume, keeping what still fits when the observation has grown.
+
+        Adding a global feature widens one weight matrix by a column and makes a strict
+        load refuse the whole checkpoint, which throws away every generation the run had
+        rather than the one row that changed. The overlap is copied and the new columns
+        start at zero, so the policy resumes exactly as it was and learns what the new
+        input means from there.
+        """
         state = torch.load(path, map_location=self.config.device)
-        self.net.load_state_dict(state["net"])
+        saved = state["net"]
+        current = self.net.state_dict()
+
+        grafted = {}
+        for name, tensor in current.items():
+            was = saved.get(name)
+            if was is None:
+                continue
+            if was.shape == tensor.shape:
+                grafted[name] = was
+                continue
+            if was.dim() != tensor.dim() or any(
+                    a > b for a, b in zip(was.shape, tensor.shape)):
+                # Smaller in some dimension than what was saved is not a widening, and
+                # guessing at it would silently resume from a policy that is not this one.
+                continue
+            widened = tensor.clone()
+            widened[tuple(slice(0, n) for n in was.shape)] = was
+            grafted[name] = widened
+            print(f"resumed {name} {tuple(was.shape)} into {tuple(tensor.shape)}",
+                  flush=True)
+
+        missing = [n for n in current if n not in grafted]
+        if missing:
+            print(f"started fresh: {', '.join(missing)}", flush=True)
+        self.net.load_state_dict(grafted, strict=False)
         self.updates = state.get("updates", 0)

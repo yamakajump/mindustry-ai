@@ -126,11 +126,24 @@ GLOBAL_FIELDS = (
     ("carrying", 30.0),
     ("unit_x", 256.0),
     ("unit_y", 256.0),
+    # Where home is, which nothing in the observation used to say.
+    #
+    # The agent knew its own position and its core's health and never the core's position,
+    # so it could not tell how far from home it was nor which way home lay. The window is
+    # forty-eight tiles and follows the unit, so once it wandered the core was simply not
+    # in the picture. It went on building defences where it happened to be standing:
+    # measured over 174 lost cores, 9.4 turrets and 16.8 walls per episode, laid a median
+    # of 60 tiles from the core and 105 on average. The defence existed and protected
+    # nothing, and the agent had no way of knowing.
+    ("core_dx", 256.0),
+    ("core_dy", 256.0),
 )
 
 #: Fields read from the unit rather than the top level of the observation.
 _UNIT_FIELDS = {"carrying": "carrying", "unit_x": "x", "unit_y": "y"}
 _TOP_LEVEL = {"tick", "wave", "wave_time", "enemies", "core_health"}
+#: Offsets from the unit to the core, which no single field holds.
+_DERIVED = {"core_dx": ("core_x", "x"), "core_dy": ("core_y", "y")}
 
 
 class MindustryEnv(gym.Env):
@@ -435,6 +448,9 @@ class MindustryEnv(gym.Env):
         for field, scale in GLOBAL_FIELDS:
             if field in _TOP_LEVEL:
                 raw = float(obs.get(field, 0.0))
+            elif field in _DERIVED:
+                where, mine = _DERIVED[field]
+                raw = float(obs.get(where, 0.0)) - float(unit.get(mine, 0))
             elif field in _UNIT_FIELDS:
                 raw = float(unit.get(_UNIT_FIELDS[field], 0))
             else:
