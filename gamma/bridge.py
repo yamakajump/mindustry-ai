@@ -46,6 +46,7 @@ class Bridge:
         # Spatial tensors are large, so they are opt-in and negotiated at handshake.
         self.tensor = tensor
         self.channels: list[str] = []
+        self.ore_hardness: list[int] = []
         #: Side of the square the bridge should send, or zero for the whole map.
         self.window = int(window)
         self._sock: socket.socket | None = None
@@ -161,6 +162,9 @@ class Bridge:
             # The layout can change between maps, so trust what this frame declares
             # rather than what the handshake said.
             self.channels = spec.get("channels", self.channels)
+            # What each ore costs to mine, in channel order. Sent by the game rather than
+            # tabulated here, because a copy of the ore hardnesses is a copy that drifts.
+            self.ore_hardness = list(spec.get("ore_hardness", self.ore_hardness))
             reply["spatial"] = self._read_tensor(spec)
         return reply
 

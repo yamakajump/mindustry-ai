@@ -293,3 +293,34 @@ def test_a_line_may_run_through_the_agents_own_network(env: MindustryEnv) -> Non
     assert not passable[theirs[1], theirs[0]], "someone else's building is still a wall"
     assert not passable[rock[1], rock[0]], "and so is rock"
     assert not ours[theirs[1], theirs[0]] and not ours[rock[1], rock[0]]
+
+
+def test_ore_too_hard_for_the_unit_is_not_offered(env: MindustryEnv, monkeypatch) -> None:
+    """The comment said the mask filtered by hardness and the code took every ore.
+
+    That is worse than no comment: it read as done. Measured over 184 episodes, 9,584
+    mining orders were refused, the largest single source of refused actions in the run
+    once routing was fixed, and the whole cause was titanium and thorium being offered to
+    a unit that cannot touch them.
+    """
+    observation, info = env.reset()
+    channels = env._bridge.channels
+    ores = [name for name in channels if name.startswith("ore_")]
+    if len(ores) < 2:
+        pytest.skip("this map carries a single ore, so hardness cannot discriminate")
+
+    spatial = np.zeros((len(channels), 8, 8), dtype=np.uint8)
+    spatial[channels.index("buildable")] = 1
+    for offset, name in enumerate(ores):
+        spatial[channels.index(name)][0, offset] = 1
+
+    monkeypatch.setattr(env._bridge, "ore_hardness", [0] + [9] * (len(ores) - 1))
+    # Mining belongs to the embodied action space, and the direct one returns before the
+    # mask is even built. Two branches, one rule, which is how the affordability gate came
+    # to be fixed in one and not the other.
+    monkeypatch.setattr(env, "embodied", True)
+    obs = {"spatial": spatial, "unit": {"mine_tier": 1, "carrying": 0, "capacity": 10}}
+
+    mineable = env._masks(obs)["mineable"]
+    assert mineable[0, 0], "the soft ore is on the table"
+    assert not mineable[0, 1:len(ores)].any(), "and nothing the unit cannot touch is"

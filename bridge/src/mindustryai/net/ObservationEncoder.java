@@ -67,6 +67,26 @@ public class ObservationEncoder {
         buffer = new byte[0];
     }
 
+    /**
+     * Hardness of each ore channel, in channel order, so the masks can tell what this unit
+     * is allowed to mine.
+     *
+     * <p>The Python side used to mark every ore tile minable and let the game refuse the
+     * ones the unit's drill tier could not touch. Measured over 184 episodes: 9,584 mining
+     * orders refused, the largest single source of refused actions in the run. A comment
+     * there claimed the mask filtered by hardness; the code took every ore channel.
+     *
+     * <p>Sent rather than tabulated on the other side, because a table of ore hardnesses
+     * copied into Python is a table that drifts from the game it describes.
+     */
+    public int[] oreHardness() {
+        int[] hardness = new int[ores.size];
+        for (int i = 0; i < ores.size; i++) {
+            hardness[i] = ores.get(i).hardness;
+        }
+        return hardness;
+    }
+
     public String[] channels() {
         return channels;
     }

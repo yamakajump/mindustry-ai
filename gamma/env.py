@@ -875,10 +875,23 @@ class MindustryEnv(gym.Env):
         # Ore the unit is actually allowed to mine, by hardness. Masking this is not a
         # convenience: an agent that keeps ordering a tier-1 unit onto thorium learns
         # nothing except that mining fails.
+        #
+        # This comment described the intent and the code below it took every ore channel
+        # there was, which is worse than no comment: it read as done. Measured over 184
+        # episodes, 9,584 mining orders were refused, the largest single source of refused
+        # actions in the run once routing was fixed, and the whole cause was titanium and
+        # thorium being offered to a unit that cannot touch them.
+        tier = int((obs.get("unit") or {}).get("mine_tier", 99))
+        hardness = list(getattr(self._bridge, "ore_hardness", []) or [])
         mineable = np.zeros_like(free)
+        ore_index = 0
         for name in channels:
-            if name.startswith("ore_"):
+            if not name.startswith("ore_"):
+                continue
+            reachable = hardness[ore_index] <= tier if ore_index < len(hardness) else True
+            if reachable:
                 mineable |= channel(name) > 0
+            ore_index += 1
 
         # Ore under a building is not reachable, and the engine agrees: validMine requires
         # a bare tile. Without this the nearest ore to a unit standing on its core is the

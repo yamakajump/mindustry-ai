@@ -1168,11 +1168,19 @@ public class StepLoop implements ApplicationListener {
             names.asArray().add(Jval.valueOf(channel));
         }
 
+        // Beside the names, what each ore costs to mine, so the mask can refuse what the
+        // unit's drill tier cannot touch instead of letting the game refuse it afterwards.
+        Jval hardness = Jval.newArray();
+        for (int value : encoder.oreHardness()) {
+            hardness.asArray().add(Jval.valueOf(value));
+        }
+
         Jval spec = Jval.newObject();
         spec.put("shape", shape);
         spec.put("dtype", "uint8");
         spec.put("bytes", tensor.length);
         spec.put("channels", names);
+        spec.put("ore_hardness", hardness);
         obs.put("tensor", spec);
 
         server.reply(obs.toString(), tensor);
