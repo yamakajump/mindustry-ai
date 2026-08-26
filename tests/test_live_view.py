@@ -421,3 +421,20 @@ def test_an_embodied_episode_is_replayed_through_a_body() -> None:
     broken = {"t": "break", "x": 3, "y": 7}
     assert replayed_action(broken, True)["type"] == "demolish"
     assert replayed_action(broken, False)["type"] == "break"
+
+
+def test_a_static_file_is_served_despite_a_query_string() -> None:
+    """`index.html?replay=...` answered 404 because the query was taken as part of the name.
+
+    Every earlier route parsed its own query; the fallback that serves everything else
+    never did, so it looked on disk for a file literally called `index.html?replay=...`.
+    """
+    import urllib.request
+
+    from gamma.monitor import TrainingMonitor
+
+    monitor = TrainingMonitor(title="static")
+    url = monitor.serve(8877)
+    with urllib.request.urlopen(f"{url}/index.html?replay=whatever", timeout=5) as answer:
+        assert answer.status == 200
+        assert b"<html" in answer.read(2048).lower()

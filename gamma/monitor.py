@@ -618,7 +618,12 @@ class TrainingMonitor:
                                 "stopping": monitor.stopping.is_set()})
                     return
 
-                name = "dashboard.html" if self.path in ("/", "") else self.path.lstrip("/")
+                # The query string is not part of the file name, and taking it as one is
+                # why `index.html?replay=...` answered 404: the server looked for a file
+                # literally called that. Every earlier route parsed its own query and this
+                # one, the fallback that serves everything else, never did.
+                path, _, _ = self.path.partition("?")
+                name = "dashboard.html" if path in ("/", "") else path.lstrip("/")
                 target = (VIEWER_DIR / name).resolve()
                 if not target.is_file() or VIEWER_DIR.resolve() not in target.parents:
                     self.send_error(404)

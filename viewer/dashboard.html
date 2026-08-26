@@ -1180,9 +1180,9 @@ function coarseTerrain(terrain, world, layer, ox, oy, cols, rows, cell, walls, n
 /** Below this many pixels a tile, a sprite is its own average colour and costs far more. */
 const COARSE_BELOW = 3;
 
-function terrainLayer(terrain, world, ox, oy, cols, rows, cell, walls) {
+function terrainLayer(terrain, world, ox, oy, cols, rows, cell, walls, coarse) {
   const slot = walls ? "wallLayer" : "floorLayer";
-  const key = `${terrain.version}:${ox}:${oy}:${cols}:${rows}:${cell}:${world.erasedCount}:${spriteEpoch}`;
+  const key = `${terrain.version}:${ox}:${oy}:${cols}:${rows}:${cell}:${world.erasedCount}:${spriteEpoch}:${coarse ? 1 : 0}`;
   if (terrain[slot + "Key"] === key && terrain[slot]) return terrain[slot];
 
   const pxW = Math.ceil(cols * cell), pxH = Math.ceil(rows * cell);
@@ -1211,7 +1211,14 @@ function terrainLayer(terrain, world, ox, oy, cols, rows, cell, walls) {
     return name;
   };
 
-  if (cell < COARSE_BELOW) {
+  // Never on the card someone has opened to look at.
+  //
+  // The detail view is where a person goes to see what the agent actually built, and it
+  // reaches a tile per pixel as soon as they zoom out to take in the whole base. Painted
+  // coarsely at that point, rock becomes flat black shapes and a drill becomes two pixels
+  // of nothing: the view that exists to show the work stops showing it. It is also one
+  // canvas rather than twenty-four, so it can afford the sprites.
+  if (coarse && cell < COARSE_BELOW) {
     coarseTerrain(terrain, world, layer, ox, oy, cols, rows, cell, walls, nameOf);
     terrain[slot] = layer;
     terrain[slot + "Key"] = key;
@@ -1446,7 +1453,7 @@ function drawMatch(canvas, match, terrain, world, zoom, now) {
   // appears or the view moves, which is a few times a second against thirty frames. They
   // are composited into one picture and blitted, so a frame that changes nothing costs a
   // single copy instead of two scaled mask multiplies per match.
-  ctx.drawImage(background(terrain, world, ox, oy, cols, rows, cell), bx, by);
+  ctx.drawImage(background(terrain, world, ox, oy, cols, rows, cell, !zoom), bx, by);
 
   const tick = lerp(world.fromTick, world.tick, alpha);
   // Entities are addressed by tile index, which only decodes against the width of the map
@@ -1470,9 +1477,11 @@ function drawMatch(canvas, match, terrain, world, zoom, now) {
  * sits. None of it changes between two frames of the same second, so paying for it per
  * frame, six matches over, was most of what made the page stutter.
  */
-function background(terrain, world, ox, oy, cols, rows, cell) {
+function background(terrain, world, ox, oy, cols, rows, cell, coarse) {
+  // `coarse` is part of the key: the same view painted the two ways is two pictures, and
+  // reusing one for the other is how opening a card shows the thumbnail's rendering.
   const key = `${terrain.version}:${ox}:${oy}:${cols}:${rows}:${cell}`
-    + `:${world.erasedCount}:${world.built}:${spriteEpoch}`;
+    + `:${world.erasedCount}:${world.built}:${spriteEpoch}:${coarse ? 1 : 0}`;
   if (terrain.backgroundKey === key && terrain.background) return terrain.background;
 
   const pxW = Math.ceil(cols * cell), pxH = Math.ceil(rows * cell);
@@ -1483,14 +1492,14 @@ function background(terrain, world, ox, oy, cols, rows, cell) {
   const ctx = canvas.getContext("2d");
   ctx.imageSmoothingEnabled = false;
   ctx.globalCompositeOperation = "copy";
-  ctx.drawImage(terrainLayer(terrain, world, ox, oy, cols, rows, cell, false), 0, 0);
+  ctx.drawImage(terrainLayer(terrain, world, ox, oy, cols, rows, cell, false, coarse), 0, 0);
   ctx.globalCompositeOperation = "source-over";
 
   // The masks are one texel per tile over the whole map; inside this canvas the map starts
   // at the origin tile of the view.
   const place = { x: -ox * cell, y: (oy + rows - terrain.height) * cell };
   multiplyMask(ctx, shadowMask(terrain, world), terrain, { cell, place });
-  ctx.drawImage(terrainLayer(terrain, world, ox, oy, cols, rows, cell, true), 0, 0);
+  ctx.drawImage(terrainLayer(terrain, world, ox, oy, cols, rows, cell, true, coarse), 0, 0);
   multiplyMask(ctx, darkMask(terrain), terrain, { cell, place });
 
   terrain.background = canvas;
