@@ -164,3 +164,26 @@ def test_breaking_can_aim_at_something_breakable(env: MindustryEnv) -> None:
     assert (mask["position"] & owned).any(), (
         "no tile holding an ally building is aimable, so breaking cannot ever work"
     )
+
+
+def test_every_way_of_building_is_remembered(env: MindustryEnv) -> None:
+    """The churn penalty watches tiles the agent built, so it must know all of them.
+
+    Only manual placements were noted at first and the penalty never fired once: measured
+    over 30 episodes, not one demolition landed on a tile the agent had `place`d, because
+    it had stopped placing by hand. Nearly everything it built came from `connect`, forty
+    blocks at a time, and those were the buildings it was tearing down. A rule watching the
+    wrong door is indistinguishable from no rule.
+    """
+    env._built_at.clear()
+    env._steps = 10
+
+    env._remember([(4, 5, "conveyor", 0), (6, 7, "mechanical-drill", 0)])
+    assert env._built_at[(4, 5)] == 10 and env._built_at[(6, 7)] == 10
+
+    # Breaking one of them soon after is churn; breaking it much later is revision.
+    assert env._note_churn("break", 4, 5) is True
+
+    env._remember([(8, 9, "conveyor", 0)])
+    env._steps = 10 + env.CHURN_WINDOW + 1
+    assert env._note_churn("break", 8, 9) is False

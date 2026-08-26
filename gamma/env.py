@@ -524,8 +524,6 @@ class MindustryEnv(gym.Env):
         cells: list[tuple[int, int, str, int]] = []
         for dx, dy, _, _ in drills:
             cells.append((ox + x0 + dx, oy + y0 + dy, "mechanical-drill", 0))
-        for cx, cy, _, _ in cells:
-            self._built_at[(cx, cy)] = self._steps
         for px, py in ((cx - ox, cy - oy) for cx, cy, _, _ in cells):
             if 0 <= px < columns - 1 and 0 <= py < rows - 1:
                 passable[py:py + 2, px:px + 2] = False
@@ -574,6 +572,7 @@ class MindustryEnv(gym.Env):
             "cells": [[cx, cy, block_name, rotation]
                       for cx, cy, block_name, rotation in cells],
         }
+        self._remember(cells)
 
     def _route_to_core(self, start: tuple[int, int],
                        core: tuple[int, int]) -> list[tuple[int, int]] | None:
@@ -666,6 +665,19 @@ class MindustryEnv(gym.Env):
             # replay of a stamping agent shows an empty map while it builds.
             "cells": [[x, y, block, rotation] for x, y, block, rotation in cells],
         }
+        self._remember(cells)
+
+    def _remember(self, cells) -> None:
+        """Note every tile an action laid, whatever laid it.
+
+        Only manual placements were noted at first, and the penalty for undoing fresh work
+        never fired once: measured over 30 episodes, not one demolition landed on a tile the
+        agent had `place`d. It had stopped placing by hand. Nearly everything it built came
+        from `connect`, forty blocks at a time, and those were the buildings it was tearing
+        down. A rule that watches the wrong door is indistinguishable from no rule.
+        """
+        for cell in cells:
+            self._built_at[(int(cell[0]), int(cell[1]))] = self._steps
 
     def _note_churn(self, kind: str, x: int, y: int) -> bool:
         """Remember what was built where, and report tearing down something still fresh.
