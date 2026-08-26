@@ -34,6 +34,7 @@ import torch
 from gamma import tasks
 from gamma.archive import ReplayArchive
 from gamma.cleanup import kill_servers
+from gamma import server
 from gamma.env import MindustryEnv
 from gamma.library import load as load_designs
 from gamma.monitor import TrainingMonitor
@@ -503,6 +504,8 @@ def save_checkpoints(agent, monitor, generation, best_mean, args) -> float | Non
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--greedy", action="store_true",
+                        help="take the whole machine: faster training, unusable desktop")
     parser.add_argument("--envs", type=int, default=6)
     parser.add_argument("--steps", type=int, default=100_000, help="total environment steps")
     parser.add_argument("--task", default="T1_copper", choices=sorted(tasks.CURRICULUM))
@@ -554,6 +557,11 @@ def main() -> None:
     # each clears the other's servers and reloads worlds underneath it, while the
     # dashboard describes a run that is no longer the one doing the work. Claiming the
     # port before anything is destroyed turns that into a refusal.
+    # Servers run below the desktop and off its last few cores unless told otherwise.
+    # Measured with twenty-four of them: the machine at 96%, java taking 73.7% and the
+    # browser watching it 2.0%, which is a frozen tab rather than a slow one.
+    server.POLITE = not args.greedy
+
     monitor = TrainingMonitor(title=f"beta / {args.task}")
     url = monitor.serve(args.port, strict=True)
 

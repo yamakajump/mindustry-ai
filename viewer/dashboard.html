@@ -1092,6 +1092,94 @@ function darkMask(terrain) {
  * unwatchable. The ground does not move, so it is painted when the view or the map
  * changes and blitted the rest of the time.
  */
+/**
+ * One colour standing in for a whole sprite, cached per block name.
+ *
+ * Read off the sprite by letting the canvas average it down to a single pixel, so it is
+ * the artwork's own colour rather than a table someone maintains by hand. Cached only once
+ * the image has actually loaded: caching a miss would pin the block to nothing for the
+ * rest of the session.
+ */
+const tileColours = new Map();
+
+function averageColour(name) {
+  if (tileColours.has(name)) return tileColours.get(name);
+  const image = imageFor(spriteOf(name));
+  if (!image) return null;
+
+  const dot = document.createElement("canvas");
+  dot.width = dot.height = 1;
+  const dctx = dot.getContext("2d", { willReadFrequently: true });
+  dctx.drawImage(image, 0, 0, 1, 1);
+  const [r, g, b, a] = dctx.getImageData(0, 0, 1, 1).data;
+  const rgba = [r, g, b, a];
+  tileColours.set(name, rgba);
+  return rgba;
+}
+
+/**
+ * The ground painted a pixel per tile, for the cards where a tile is about a pixel.
+ *
+ * A card shows the whole playable area, so a tile lands on roughly one screen pixel and
+ * the fine path still draws a thirty-two pixel sprite for each of them, one call at a
+ * time, three times over, for every match on the page. Measured on a live run with
+ * twenty-four matches: a single task of 28.9 seconds and not one frame rendered in ten,
+ * which is not lag but a hung tab.
+ *
+ * At that size the sprite is indistinguishable from its own average colour, because that
+ * is arithmetically what the browser is computing when it scales it down. So the colour is
+ * computed once per block type and the whole layer becomes one image: two operations
+ * instead of a hundred thousand.
+ */
+function coarseTerrain(terrain, world, layer, ox, oy, cols, rows, cell, walls, nameOf) {
+  const { width: mapW, height: mapH } = terrain;
+  const top = oy + rows - 1;
+
+  const buffer = document.createElement("canvas");
+  buffer.width = cols;
+  buffer.height = rows;
+  const bctx = buffer.getContext("2d");
+  const image = bctx.createImageData(cols, rows);
+  const data = image.data;
+
+  for (let y = Math.max(0, oy); y <= Math.min(mapH - 1, oy + rows - 1); y++) {
+    for (let x = Math.max(0, ox); x <= Math.min(mapW - 1, ox + cols - 1); x++) {
+      const i = y * mapW + x;
+      const at = ((top - y) * cols + (x - ox)) * 4;
+      if (at < 0 || at + 3 >= data.length) continue;
+
+      let rgba = null;
+      if (walls) {
+        const id = terrain.block[i];
+        if (id && !world.erased.has(i)) {
+          const name = nameOf(id);
+          rgba = name ? averageColour(name) : null;
+          if (!rgba) rgba = [90, 90, 100, 255];
+        }
+      } else {
+        const overlay = terrain.overlay[i];
+        const name = nameOf(overlay) || nameOf(terrain.floor[i]);
+        rgba = name ? averageColour(name) : null;
+        if (!rgba) rgba = [26, 26, 32, 255];
+      }
+      if (!rgba) continue;
+
+      data[at] = rgba[0];
+      data[at + 1] = rgba[1];
+      data[at + 2] = rgba[2];
+      data[at + 3] = rgba[3];
+    }
+  }
+
+  bctx.putImageData(image, 0, 0);
+  const ctx = layer.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(buffer, 0, 0, cols, rows, 0, 0, layer.width, layer.height);
+}
+
+/** Below this many pixels a tile, a sprite is its own average colour and costs far more. */
+const COARSE_BELOW = 3;
+
 function terrainLayer(terrain, world, ox, oy, cols, rows, cell, walls) {
   const slot = walls ? "wallLayer" : "floorLayer";
   const key = `${terrain.version}:${ox}:${oy}:${cols}:${rows}:${cell}:${world.erasedCount}:${spriteEpoch}`;
@@ -1122,6 +1210,13 @@ function terrainLayer(terrain, world, ox, oy, cols, rows, cell, walls) {
     }
     return name;
   };
+
+  if (cell < COARSE_BELOW) {
+    coarseTerrain(terrain, world, layer, ox, oy, cols, rows, cell, walls, nameOf);
+    terrain[slot] = layer;
+    terrain[slot + "Key"] = key;
+    return layer;
+  }
 
   const paint = (id, x, y, tile, fallback) => {
     const name = nameOf(id);
@@ -1287,7 +1382,14 @@ function followAgent(world, match, now) {
 
 function drawMatch(canvas, match, terrain, world, zoom, now) {
   const ctx = canvas.getContext("2d");
-  const ratio = Math.min(2, window.devicePixelRatio || 1);
+  // Full device resolution only for the match being looked at.
+  //
+  // A card is a thumbnail a few hundred pixels across, and on a high density screen it was
+  // being drawn at twice that on each axis, so four times the pixels, for detail nobody
+  // can resolve at that size. The game does the same thing for the same reason: it renders
+  // the world once at the resolution it needs and scales the result, rather than paying
+  // for pixels it is about to throw away.
+  const ratio = zoom ? Math.min(2, window.devicePixelRatio || 1) : 1;
   const width = Math.max(1, Math.round(canvas.clientWidth * ratio));
   const height = Math.max(1, Math.round(canvas.clientHeight * ratio));
   if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
@@ -1999,6 +2101,7 @@ function buildCard(match) {
   card.onclick = () => openDetail(match.index);
   document.getElementById("matches").append(card);
   cards.set(match.index, card);
+  watchCard(match.index, card);
   return card;
 }
 
@@ -2405,13 +2508,38 @@ async function refreshState() {
   }
 }
 
+/**
+ * Which cards are actually on screen.
+ *
+ * Twenty-four matches do not fit on a laptop, and the ones below the fold were being
+ * polled and redrawn exactly as hard as the ones being looked at. Measured on a live run:
+ * 720 canvas renders and 133 requests a second, for perhaps six cards a person can see.
+ */
+const onScreen = new Set();
+const watcher = new IntersectionObserver(entries => {
+  for (const entry of entries) {
+    const index = Number(entry.target.dataset.match);
+    if (Number.isNaN(index)) continue;
+    if (entry.isIntersecting) onScreen.add(index);
+    else onScreen.delete(index);
+  }
+}, { rootMargin: "200px" });
+
+function watchCard(index, element) {
+  element.dataset.match = String(index);
+  watcher.observe(element);
+}
+
+const visible = index => detailIndex === index || onScreen.has(index);
+
 /** Poll the animation of whatever is on screen, and only that. */
 function refreshScenes() {
   if (detailIndex !== null) { pollScene(detailIndex); return; }
-  for (const match of matches) if (match.alive) pollScene(match.index);
+  for (const match of matches) if (match.alive && visible(match.index)) pollScene(match.index);
 }
 
 let lastCardDraw = 0;
+let cardCursor = 0;
 function frame(now) {
   requestAnimationFrame(frame);
   if (!spriteIndex) return;
@@ -2427,13 +2555,28 @@ function frame(now) {
     return;
   }
 
-  // Cards at thirty frames a second. Six canvases at sixty would spend more time drawing
-  // sightseeing than the training spends learning.
-  if (now - lastCardDraw < 33) return;
+  // Cards on screen, a few per frame, spread round.
+  //
+  // Thirty a second for every match whether or not it was scrolled into view came to 720
+  // canvas renders a second for the handful a person can see. Drawing them all in one
+  // frame is also what makes a frame long: eighteen cards at once is eighteen times the
+  // work in a single task, and a task that overruns is a dropped frame however cheap each
+  // card is on its own.
+  //
+  // So each frame takes the next few and leaves the rest for the frames after it. Every
+  // card still comes round at about twelve a second, which is more than a thumbnail needs,
+  // and no frame ever carries more than a slice of the total.
+  if (now - lastCardDraw < 20) return;
   lastCardDraw = now;
-  for (const match of matches) {
+
+  const live = matches.filter(m => visible(m.index) && cards.has(m.index));
+  if (!live.length) return;
+
+  const slice = Math.max(1, Math.ceil(live.length / 4));
+  for (let taken = 0; taken < slice; taken++) {
+    cardCursor = (cardCursor + 1) % live.length;
+    const match = live[cardCursor];
     const card = cards.get(match.index);
-    if (!card) continue;
     const world = worldOf(match.index);
     world.sweep(now);
     drawMatch(card.querySelector("canvas"), match, terrains.get(match.index), world, 0, now);

@@ -7,8 +7,10 @@ which looks exactly like a hang in the game and wastes an afternoon.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
+import sys
 import subprocess
 import threading
 import time
@@ -22,6 +24,62 @@ ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 # Printed once the server has finished loading and is accepting commands.
 READY_PATTERN = r"Server loaded\.|Opened a server|Loaded \d+ mod"
+
+
+#: Windows takes a creation flag; POSIX takes a `nice` call before exec.
+_BELOW_NORMAL: dict[str, object]
+if sys.platform == "win32":
+    _BELOW_NORMAL = {"creationflags": subprocess.BELOW_NORMAL_PRIORITY_CLASS}
+else:
+    _BELOW_NORMAL = {"preexec_fn": lambda: os.nice(5)}
+
+
+#: Logical processors kept away from the servers, so something is always free to draw.
+#:
+#: Below-normal priority was not enough on its own, and the measurement says why: with
+#: twenty-four servers the machine sat at 96%, java taking 73.7% and the browser watching
+#: it 2.0%. Lowering the priority moved the browser to 3.6%, because a priority only
+#: decides who wins a contested slice and a bursty renderer rarely turns up to contest one.
+#:
+#: Reserving is different: these cores are not offered to the servers at all, so the
+#: desktop has somewhere to run without asking. Two physical cores, which on this hardware
+#: is four logical ones, is the smallest reservation that keeps a browser smooth, and it
+#: costs the run about a sixteenth of its throughput.
+RESERVED_CORES = 4
+
+#: Set to False by a caller that wants the machine to itself.
+#:
+#: The polite behaviour is the default because a run that makes the desktop unusable gets
+#: stopped, and a stopped run learns nothing. But it is a trade and the numbers should be
+#: stated: on this machine, with a game also running, the servers went from about 330 steps
+#: a second to 153 while the browser watching them went from frozen to smooth.
+POLITE = True
+
+
+def _reserve_cores_for_the_desktop(pid: int) -> None:
+    """Keep a headless server off the last few logical processors.
+
+    Best effort by design: a machine with too few cores to spare, or an OS that will not
+    say, gets the default behaviour rather than an exception in the middle of starting a
+    run.
+    """
+    total = os.cpu_count() or 0
+    if not POLITE or total <= RESERVED_CORES * 2:
+        return
+
+    mask = (1 << (total - RESERVED_CORES)) - 1
+    try:
+        if sys.platform == "win32":
+            import ctypes
+
+            handle = ctypes.windll.kernel32.OpenProcess(0x0200 | 0x0400, False, pid)
+            if handle:
+                ctypes.windll.kernel32.SetProcessAffinityMask(handle, ctypes.c_size_t(mask))
+                ctypes.windll.kernel32.CloseHandle(handle)
+        elif hasattr(os, "sched_setaffinity"):
+            os.sched_setaffinity(pid, range(total - RESERVED_CORES))
+    except Exception:
+        pass
 
 
 class ServerProcess:
@@ -58,7 +116,21 @@ class ServerProcess:
             encoding="utf-8",
             errors="replace",
             bufsize=1,
+            # Below the rest of the desktop, deliberately.
+            #
+            # Twenty-four servers saturate the machine: measured on a live run, 73.7% of a
+            # sixteen core box in java and 2.0% in the browser watching it. The dashboard
+            # was not slow, it was starved, and no amount of work on the rendering can give
+            # a thread time it is not being scheduled.
+            #
+            # Below-normal costs the run almost nothing, because nothing else on the
+            # machine wants the CPU most of the time and the servers still take every idle
+            # cycle. What changes is that the moment somebody moves a mouse, the window
+            # answering them wins.
+            **(_BELOW_NORMAL if POLITE else {}),
         )
+        _reserve_cores_for_the_desktop(self._proc.pid)
+
         self._reader = threading.Thread(target=self._pump, daemon=True)
         self._reader.start()
         self.wait_for(READY_PATTERN, timeout=self.start_timeout)
