@@ -347,4 +347,10 @@ def test_tearing_down_your_own_work_costs_something(reward) -> None:
     before = state(stats={"buildings_deconstructed": 4})
     after = state(stats={"buildings_deconstructed": 6})
 
-    assert reward(before, after) == pytest.approx(-1.0), "two buildings torn down, half each"
+    assert reward(before, after) == pytest.approx(-0.2), "two buildings torn down, an ore each"
+
+    # A nudge and not a prohibition: what a demolition really costs or earns is what the
+    # base delivers afterwards, and pricing it like a building lost in combat would make
+    # revising an implantation dearer than leaving it to rot.
+    torn = tasks.get("frontier").reward.terms(before, after)["torn"]
+    assert abs(torn) < 0.5, "a player pulls things down to lay them again better"

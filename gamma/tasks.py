@@ -591,11 +591,22 @@ class _BuildAndHold:
             # first thing the agent did with it was cover its own drills and belts in
             # demolition orders.
             #
-            # Priced like a building lost to the enemy, because the outcome is the same and
-            # only the cause differs. Correcting a misplacement still costs about five ore
-            # of delivery, which is a real price and not a prohibition.
+            # Priced at one ore, not five, and the difference is the whole argument.
+            #
+            # Pulling something down to lay it again better is what a player does: a belt
+            # that dead-ends, a line that wants rerouting, a drill in the way of a better
+            # drill. Charging that the price of a building lost in combat makes revising an
+            # implantation cost more than leaving it to rot, and an agent that cannot afford
+            # to change its mind builds once and lives with it forever.
+            #
+            # What actually separates the two cases is not the price, it is the consequence,
+            # and the reward already states it: a demolition that improves the base shows up
+            # as more delivered on the steps that follow, and one that razes a working drill
+            # shows up as less. That signal is exact and it costs nothing to maintain. It is
+            # simply invisible while the agent delivers almost nothing, which is why a nudge
+            # against aimless churn is worth having at all, and why it should stay a nudge.
             "torn": (_stat("buildings_deconstructed")(after)
-                     - _stat("buildings_deconstructed")(before)) * -0.5,
+                     - _stat("buildings_deconstructed")(before)) * -0.1,
             "waves": (_wave(after) - _wave(before)) * 1.0,
             "damage": max(0.0, float(before.get("core_health", 0.0))
                           - float(after.get("core_health", 0.0))) * -0.005,
