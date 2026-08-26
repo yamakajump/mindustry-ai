@@ -335,7 +335,15 @@ class TrainingMonitor:
         self._history: list[dict[str, Any]] = []
         #: One entry per training update, so progress can be read as a curve rather than
         #: guessed from whichever episodes happen to be on screen.
+        #:
+        #: Written to disk as well as kept here, and that is not a nicety. The curve lived
+        #: only in this process and only for its last four hundred points, so stopping a
+        #: run to look at a replay erased the whole history of it. Asked one morning what
+        #: the overnight progression had been, across ten restarts and 4.7 million steps,
+        #: nothing anywhere could answer: the weights were all that survived, and weights
+        #: do not say where they came from.
         self._generations: list[dict[str, Any]] = []
+        self.history_path: Path | None = None
         self._pending: list[float] = []
         #: Replay archives by match, so a recorded episode can be downloaded by name
         #: without the server ever joining a path from a URL.
@@ -413,7 +421,40 @@ class TrainingMonitor:
             }
             self._generations.append(generation)
             del self._generations[:-400]
+            self._remember_generation(generation)
             return generation
+
+    def follow_history(self, path) -> None:
+        """Keep the curve on disk, and pick up whatever earlier runs left there.
+
+        A resumed run continues a history rather than starting one: the night this was
+        written, ten restarts left ten separate curves and no way to lay them end to end.
+        """
+        self.history_path = Path(path)
+        self.history_path.parent.mkdir(parents=True, exist_ok=True)
+        if not self.history_path.exists():
+            return
+        earlier = []
+        with self.history_path.open(encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    earlier.append(json.loads(line))
+                except json.JSONDecodeError:
+                    # A run killed mid-write leaves half a line. One truncated point is
+                    # not a reason to lose the other few thousand.
+                    continue
+        with self._lock:
+            self._generations = (earlier + self._generations)[-400:]
+
+    def _remember_generation(self, generation: dict[str, Any]) -> None:
+        if self.history_path is None:
+            return
+        try:
+            with self.history_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(generation) + "\n")
+        except OSError:
+            # Losing a point on the curve must never bring a training run down.
+            pass
 
     #: Set by whoever can move through time. A training run cannot: it has no earlier
     #: state to go back to, so seeking is refused rather than silently ignored. A

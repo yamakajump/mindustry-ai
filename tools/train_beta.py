@@ -38,6 +38,7 @@ from gamma import server
 from gamma.env import MindustryEnv
 from gamma.library import load as load_designs
 from gamma.monitor import TrainingMonitor
+from gamma.journal import Journal
 from gamma.replay import ReplayRecorder, _encode_bytes
 from tools.extract_sprites import ensure_assets
 from gamma.net import PolicyNet
@@ -111,10 +112,12 @@ class EnvWorker:
     """One environment on its own thread, driven by a request/response queue pair."""
 
     def __init__(self, index: int, args, monitor: TrainingMonitor,
-                 showcase: bool = False) -> None:
+                 journal: Journal | None = None, showcase: bool = False) -> None:
         self.index = index
         self.args = args
         self.monitor = monitor
+        #: Shared by every worker: one file, one line per episode, appended under a lock.
+        self.journal = journal
         #: True for the one match played at a speed a person can follow.
         #:
         #: It is deliberately **not** part of the training batch. Rollout collection is
@@ -201,6 +204,11 @@ class EnvWorker:
         if self.args.record:
             self.archive = ReplayArchive(Path(self.args.replays) / f"match{self.index}")
             self.recorder = ReplayRecorder(env, self.archive.pending(0))
+            # Every episode leaves a line here whatever the archive decides to keep. The
+            # archive prunes to the best five per match, so reading it by age compares
+            # survivors against a fresh sample and manufactures a collapse; the journal is
+            # the same measure applied to every episode alike, and it is never pruned.
+            self.recorder.journal = self.journal
             self.monitor.register_replays(self.index, self.archive)
             inner = self.recorder
 
@@ -541,6 +549,11 @@ def save_checkpoints(agent, monitor, generation, best_mean, args) -> float | Non
     """
     agent.save(args.out / "beta.pt")
 
+    # Stamped before the weights, so every episode of this generation is filed under it.
+    journal = getattr(monitor, "journal", None)
+    if journal is not None:
+        journal.generation = agent.updates
+
     if args.save_every > 0 and agent.updates % args.save_every == 0:
         name = f"beta-gen{agent.updates:04d}.pt"
         agent.save(args.out / name)
@@ -621,6 +634,10 @@ def main() -> None:
     server.POLITE = not args.greedy
 
     monitor = TrainingMonitor(title=f"beta / {args.task}")
+    # The curve outlives the process. It used to live only in memory, so stopping a run to
+    # look at a replay erased its whole history: after ten restarts and 4.7 million steps
+    # overnight, nothing could say what the progression had been.
+    monitor.follow_history(args.out / "history.jsonl")
     url = monitor.serve(args.port, strict=True)
 
     # A killed run leaves its servers holding the ports, and the next one then
@@ -641,9 +658,11 @@ def main() -> None:
     # The showcase is an extra environment, not one of the training ones. `--envs 16`
     # means sixteen environments feeding the learner, plus one more to look at.
     showcase_index = args.envs if args.watch else -1
-    workers = [EnvWorker(i, args, monitor) for i in range(args.envs)]
+    journal = Journal(args.out / "journal.jsonl")
+    monitor.journal = journal
+    workers = [EnvWorker(i, args, monitor, journal) for i in range(args.envs)]
     if args.watch:
-        workers.append(EnvWorker(showcase_index, args, monitor, showcase=True))
+        workers.append(EnvWorker(showcase_index, args, monitor, journal, showcase=True))
     for worker in workers:
         worker.start()
     for worker in workers:

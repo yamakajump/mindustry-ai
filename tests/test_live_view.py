@@ -438,3 +438,39 @@ def test_a_static_file_is_served_despite_a_query_string() -> None:
     with urllib.request.urlopen(f"{url}/dashboard.html?replay=whatever", timeout=5) as answer:
         assert answer.status == 200
         assert b"<html" in answer.read(2048).lower()
+
+
+def test_the_curve_survives_the_process(tmp_path):
+    """It lived only in memory, and only for its last four hundred points.
+
+    Stopping a run to look at a replay therefore erased the whole history of it. Asked one
+    morning what the overnight progression had been, across ten restarts and 4.7 million
+    steps, nothing anywhere could answer: the weights were all that survived, and weights
+    do not say where they came from.
+    """
+    path = tmp_path / "history.jsonl"
+
+    first = TrainingMonitor(title="run")
+    first.follow_history(path)
+    first._remember_generation({"update": 1, "mean_reward": 10.0})
+    first._remember_generation({"update": 2, "mean_reward": 20.0})
+
+    resumed = TrainingMonitor(title="run")
+    resumed.follow_history(path)
+    assert [g["update"] for g in resumed._generations] == [1, 2], (
+        "a resumed run continues a history rather than starting one")
+
+    resumed._remember_generation({"update": 3, "mean_reward": 30.0})
+    again = TrainingMonitor(title="run")
+    again.follow_history(path)
+    assert [g["update"] for g in again._generations] == [1, 2, 3]
+
+
+def test_a_half_written_point_does_not_cost_the_rest(tmp_path):
+    """A run killed mid-write leaves half a line, which is not a reason to lose thousands."""
+    path = tmp_path / "history.jsonl"
+    path.write_text('{"update": 1}\n{"update": 2\n{"update": 3}\n', encoding="utf-8")
+
+    monitor = TrainingMonitor(title="run")
+    monitor.follow_history(path)
+    assert [g["update"] for g in monitor._generations] == [1, 3]

@@ -18,6 +18,8 @@ import zlib
 from pathlib import Path
 from typing import Any
 
+from gamma.journal import EpisodeTally, Journal
+
 import numpy as np
 
 #: Bumped when the on-disk shape changes in a way a viewer must know about.
@@ -70,6 +72,12 @@ class ReplayRecorder:
         target.capture_scene = True
         self._previous_raw: dict[str, Any] | None = None
         self._step = 0
+        #: Set by the trainer so every episode leaves a line that outlives the archive.
+        #: The archive prunes to the best five per environment, so reading it by age
+        #: compares survivors against a fresh sample; the journal keeps them all.
+        self.journal: Journal | None = None
+        self._tally = EpisodeTally()
+        self._core: tuple[int, int] | None = None
 
     # Plumbing --------------------------------------------------------------------
 
@@ -133,6 +141,9 @@ class ReplayRecorder:
             "rotation": _encode_bytes(planes[tiles * 6:tiles * 7]),
         })
 
+        self._core = (int(raw.get("core_x", -1)), int(raw.get("core_y", -1)))
+        if self._core[0] < 0:
+            self._core = None
         self._write(self._frame(raw, reward=0.0))
         return observation, info
 
@@ -140,8 +151,13 @@ class ReplayRecorder:
         observation, reward, terminated, truncated, info = self.env.step(action)
         self._step += 1
         if self._file is not None:
-            self._write(self._frame(info["raw"], reward, info.get("action"), action,
-                                    info.get("scene")))
+            # Built once and used twice: the frame goes to the recording and the tally
+            # counts it. Counting from a second pass over the file is how a measurement
+            # comes to describe an archive that has been pruned underneath it.
+            frame = self._frame(info["raw"], reward, info.get("action"), action,
+                                info.get("scene"))
+            self._tally.note(frame, self._core)
+            self._write(frame)
             if terminated or truncated:
                 self._write({
                     "type": "end",
@@ -289,6 +305,15 @@ class ReplayRecorder:
         if self._file is not None:
             self._file.close()
             self._file = None
+        if self.journal is not None and self._tally.steps:
+            self.journal.append(self._tally.summary(
+                generation=self.journal.generation,
+                solved=self._tally.wave > 10,
+                task=self.env.task.name,
+                map=self.env.task.map_name,
+                file=self.path.name,
+            ))
+        self._tally = EpisodeTally()
 
     def close(self) -> None:
         self.finish()

@@ -214,14 +214,28 @@ def trend(url: str) -> str:
     The dashboard keeps the mean over the last thirty finished episodes for each
     generation, which is the same measure applied to every generation alike.
     """
+    generations = []
     try:
         import urllib.request
         with urllib.request.urlopen(url, timeout=5) as answer:
             generations = json.loads(answer.read())["generations"]
-    except Exception as error:
-        return (f"  tendance indisponible ({type(error).__name__}). L'archive ne "
-                f"peut pas la remplacer : elle garde les meilleurs episodes, donc "
-                f"toute lecture par anciennete y montre une chute.")
+    except Exception:
+        # The run may simply be stopped, which is exactly when someone wants to know how
+        # it went. The dashboard keeps four hundred points in memory; the file keeps all
+        # of them, across every restart.
+        history = Path("checkpoints/history.jsonl")
+        if history.exists():
+            with history.open(encoding="utf-8") as handle:
+                for line in handle:
+                    try:
+                        generations.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+
+    if not generations:
+        return ("  tendance indisponible : ni tableau de bord ni historique. L'archive "
+                "ne peut pas la remplacer, elle garde les meilleurs episodes, donc "
+                "toute lecture par anciennete y montre une chute.")
 
     points = [g for g in generations if g.get("mean_reward") is not None]
     if len(points) < 12:
