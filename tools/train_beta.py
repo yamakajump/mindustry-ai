@@ -292,6 +292,23 @@ class EnvWorker:
 
         self._store_terrain(typed, state)
 
+    def _retake_terrain_if_stale(self, env, state, info) -> None:
+        """Refetch the map when it stops describing the world the agent is in.
+
+        Cheap in the case that matters, which is almost every step: two integers compared.
+        A generated sector loads asynchronously, so this fires once shortly after an episode
+        starts and then never again for that episode.
+        """
+        size = self._map_size(info)
+        if size is None or state.terrain is None:
+            return
+        if (state.terrain.get("width"), state.terrain.get("height")) == size:
+            return
+
+        typed = self._fetch_map(env)
+        if typed is not None and (typed["width"], typed["height"]) == size:
+            self._store_terrain(typed, state)
+
     @staticmethod
     def _map_size(info) -> tuple[int, int] | None:
         """The size the observation says the world is, which is the one that matters."""
@@ -388,6 +405,13 @@ class EnvWorker:
                     state.applied += bool(outcome.get("applied"))
                     state.refused += not outcome.get("applied")
 
+                # The world can finish loading after the reset that asked for it, and
+                # when it does the terrain captured a moment earlier is the previous map.
+                # Checking at reset does not catch it: the observation is stale too at that
+                # instant, so the two agree and the check passes. Reacting to the
+                # disagreement heals it a step after the world settles, which is the only
+                # moment anything can know.
+                self._retake_terrain_if_stale(env, state, info)
                 self._capture_scene(env, state, scene=info.get("scene"))
 
                 done = terminated or truncated
