@@ -255,3 +255,33 @@ def test_connect_is_not_offered_to_an_agent_that_cannot_pay_for_a_line(
     offered = env._masks(env._last_obs)["type"][where]
     assert offered or not env._masks(env._last_obs)["mineable"].any(), (
         "with ore in view and the copper for both, it must be on the table")
+
+
+def test_a_line_may_run_through_the_agents_own_network(env: MindustryEnv) -> None:
+    """Everything built counted as a wall, so the first line to the core sealed it.
+
+    Every tile touching the core was then one of the agent's own conveyors, and no second
+    line could ever arrive: the better the economy got, the more thoroughly it walled
+    itself in. Measured over 179 episodes after the search itself was fixed, "no route"
+    was still the leading refusal in the run, 15,181 connects and 9,523 stamps, and it was
+    never the terrain.
+    """
+    env.reset()
+    channels = env._bridge.channels
+    spatial = np.zeros((len(channels), 8, 8), dtype=np.uint8)
+
+    mine, theirs, rock = (1, 1), (3, 3), (5, 5)
+    for x, y in (mine, theirs):
+        spatial[channels.index("block")][y, x] = 1
+    spatial[channels.index("block_ally")][mine[1], mine[0]] = 1
+    spatial[channels.index("solid")][rock[1], rock[0]] = 1
+
+    env._last_obs = {"spatial": spatial, "map_width": 8, "map_height": 8,
+                     "window_origin": (0, 0)}
+    passable, ours = env._ground()
+
+    assert passable[mine[1], mine[0]], "its own conveyor is something to run into"
+    assert ours[mine[1], mine[0]], "and it is known to be occupied, so nothing is relaid"
+    assert not passable[theirs[1], theirs[0]], "someone else's building is still a wall"
+    assert not passable[rock[1], rock[0]], "and so is rock"
+    assert not ours[theirs[1], theirs[0]] and not ours[rock[1], rock[0]]

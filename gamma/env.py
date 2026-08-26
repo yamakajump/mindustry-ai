@@ -519,35 +519,38 @@ class MindustryEnv(gym.Env):
             self._last_connect = {"applied": False, "type": CONNECT, "reason": "no ore"}
             return
 
-        solid = spatial[channels.index("solid")] > 0
-        block = spatial[channels.index("block")] > 0
-        passable = ~(solid | block)
+        # Routed in world coordinates, on ground that only the window describes. Outside it
+        # nothing is known, so nothing is claimed: unknown ground is treated as open, which
+        # is what the old L-shaped routing assumed everywhere.
+        ground = self._ground()
+        if ground is None:
+            self._last_connect = {"applied": False, "type": CONNECT, "reason": "no world yet"}
+            return
+        known, ours = ground
 
         # Back to world coordinates, which is what the bridge builds in.
         cells: list[tuple[int, int, str, int]] = []
         for dx, dy, _, _ in drills:
             cells.append((ox + x0 + dx, oy + y0 + dy, "mechanical-drill", 0))
-        for px, py in ((cx - ox, cy - oy) for cx, cy, _, _ in cells):
-            if 0 <= px < columns - 1 and 0 <= py < rows - 1:
-                passable[py:py + 2, px:px + 2] = False
+        # A drill needs its whole square, so the line cannot be routed through one it is
+        # about to lay.
+        for cx, cy, _, _ in cells:
+            known[cy:cy + 2, cx:cx + 2] = False
 
         # From the drill nearest the core, because that is the shortest line and the line
         # is what costs.
         head = min(cells, key=lambda cell: abs(cell[0] - core[0]) + abs(cell[1] - core[1]))
-
-        # Routed in world coordinates, on a passability map that only covers the window.
-        # Outside it nothing is known, so nothing is claimed: unknown ground is treated as
-        # open, which is what the old L-shaped routing assumed everywhere.
-        known = np.ones((int(raw.get("map_height", rows)),
-                         int(raw.get("map_width", columns))), dtype=bool)
-        known[oy:oy + rows, ox:ox + columns] = passable
 
         steps = mining.path(known, (head[0], head[1] - 1), core)
         if steps is None:
             self._last_connect = {"applied": False, "type": CONNECT, "reason": "no route"}
             return
 
-        cells += [(p.x, p.y, p.block, p.rotation) for p in mining.belt(steps)]
+        # Nothing is laid where something of the agent's already stands: the line runs into
+        # its own network rather than over it, which is what a player does and what keeps a
+        # working belt from being overwritten with the wrong rotation.
+        cells += [(p.x, p.y, p.block, p.rotation) for p in mining.belt(steps)
+                  if not ours[p.y, p.x]]
         if len(cells) > self.CONNECT_BUDGET:
             self._last_connect = {
                 "applied": False, "type": CONNECT, "reason": "too far",
@@ -594,6 +597,27 @@ class MindustryEnv(gym.Env):
         open. That is exactly what the L-shaped routing assumed everywhere, and it is a
         much smaller assumption when it only covers the part nobody can see.
         """
+        ground = self._ground()
+        if ground is None:
+            return None
+        passable, _ = ground
+        return mining.path(passable, start, core)
+
+    def _ground(self) -> tuple[np.ndarray, np.ndarray] | None:
+        """What a belt can cross, and which of it is already the agent's, map-wide.
+
+        Its own buildings do not block it, and that is the whole correction. Everything
+        built counted as a wall, so the first line to reach the core sealed the core: every
+        tile touching it was then one of the agent's own conveyors, and no second line
+        could ever arrive. The better the economy got, the more thoroughly it walled itself
+        in. Measured over 179 episodes after the search itself was fixed, "no route" was
+        still the leading refusal in the run, 15,181 connects and 9,523 stamps, and it was
+        never the terrain.
+
+        A player does not route around their own belt, they run into it. So allied ground
+        is crossed, and the caller lays nothing on the tiles that are already occupied:
+        the ore rides what is already there.
+        """
         raw = self._last_obs
         spatial = raw.get("spatial")
         width = int(raw.get("map_width", 0))
@@ -602,16 +626,20 @@ class MindustryEnv(gym.Env):
             return None
 
         channels = self._bridge.channels if self._bridge else []
-        known = np.ones((height, width), dtype=bool)
+        passable = np.ones((height, width), dtype=bool)
+        ours = np.zeros((height, width), dtype=bool)
         if "solid" in channels and "block" in channels:
-            blocked = ((spatial[channels.index("solid")] > 0)
-                       | (spatial[channels.index("block")] > 0))
+            solid = spatial[channels.index("solid")] > 0
+            block = spatial[channels.index("block")] > 0
+            mine = (spatial[channels.index("block_ally")] > 0
+                    if "block_ally" in channels else np.zeros_like(block))
             origin = raw.get("window_origin") or (0, 0)
             ox, oy = int(origin[0]), int(origin[1])
-            rows, columns = blocked.shape
-            known[oy:oy + rows, ox:ox + columns] = ~blocked
+            rows, columns = block.shape
+            passable[oy:oy + rows, ox:ox + columns] = ~(solid | (block & ~mine))
+            ours[oy:oy + rows, ox:ox + columns] = block & mine
 
-        return mining.path(known, start, core)
+        return passable, ours
 
     def _stamp(self, action: np.ndarray) -> None:
         """Lay a whole structure, one bridge action per block, before the world ticks.
@@ -642,12 +670,17 @@ class MindustryEnv(gym.Env):
         # over a hundred, a ninety-ninth percentile of 405 and a worst of 561, on an agent
         # that starts with three hundred copper and one unit to build with. A structure it
         # can neither pay for nor reach is not a structure, it is a queue.
-        steps = self._route_to_core(anchor, core)
+        ground = self._ground()
+        steps = mining.path(ground[0], anchor, core) if ground else None
         if steps is None:
             self._last_stamp = {"applied": False, "type": STAMP, "reason": "no route"}
             return
 
-        cells += [(p.x, p.y, p.block, p.rotation) for p in mining.belt(steps)]
+        # As for a connect: the line runs into what is already the agent's rather than
+        # over it, so a working belt is never overwritten with the wrong rotation.
+        ours = ground[1]
+        cells += [(p.x, p.y, p.block, p.rotation) for p in mining.belt(steps)
+                  if not ours[p.y, p.x]]
         if len(cells) > self.CONNECT_BUDGET:
             self._last_stamp = {
                 "applied": False, "type": STAMP, "reason": "too far",
